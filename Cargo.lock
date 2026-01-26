@@ -1581,6 +1581,7 @@ dependencies = [
  "bincode",
  "chrono",
  "redb",
+ "regex",
  "reqwest 0.12.28",
  "rig-core",
  "schemars",

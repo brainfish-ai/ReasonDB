@@ -8,6 +8,7 @@
 //! - Reasoning engine trait (`ReasoningEngine`)
 //! - Search engine with beam search
 //! - Filtering with `SearchFilter`
+//! - RQL query language
 //!
 //! ## Example
 //!
@@ -32,6 +33,11 @@
 //!     .with_table_id(&table.id)
 //!     .with_tags(vec!["nda"]);
 //! let docs = store.find_documents(&filter)?;
+//!
+//! // Or use RQL query language
+//! use reasondb_core::rql::Query;
+//! let query = Query::parse("SELECT * FROM legal_contracts WHERE author = 'Alice'")?;
+//! let results = store.execute_rql(&query)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -40,6 +46,7 @@ pub mod engine;
 pub mod error;
 pub mod llm;
 pub mod model;
+pub mod rql;
 pub mod store;
 
 // Re-export main types

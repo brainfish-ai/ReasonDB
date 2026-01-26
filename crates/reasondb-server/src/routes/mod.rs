@@ -4,6 +4,7 @@
 
 pub mod documents;
 pub mod ingest;
+pub mod query;
 pub mod search;
 pub mod tables;
 
@@ -43,6 +44,8 @@ fn v1_routes<R: ReasoningEngine + Clone + Send + Sync + 'static>(state: Arc<AppS
         .route("/ingest/url", post(ingest::ingest_url::<R>))
         // Search
         .route("/search", post(search::search::<R>))
+        // RQL Query
+        .route("/query", post(query::execute_query::<R>))
         // Documents
         .route("/documents", get(documents::list_documents::<R>))
         .route("/documents/:id", get(documents::get_document::<R>))
