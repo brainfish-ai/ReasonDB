@@ -23,7 +23,7 @@ use super::ast::*;
 /// Result of executing a query.
 #[derive(Debug, Clone)]
 pub struct QueryResult {
-    /// Matched documents
+    /// Matched documents (for regular SELECT queries)
     pub documents: Vec<DocumentMatch>,
     /// Total count (before pagination)
     pub total_count: usize,
@@ -31,6 +31,54 @@ pub struct QueryResult {
     pub execution_time_ms: u64,
     /// Query execution statistics
     pub stats: QueryStats,
+    /// Aggregate results (for COUNT/SUM/AVG/etc. queries)
+    pub aggregates: Option<Vec<AggregateResult>>,
+    /// Query plan (for EXPLAIN queries)
+    pub explain: Option<QueryPlan>,
+}
+
+/// Result of an aggregate function
+#[derive(Debug, Clone)]
+pub struct AggregateResult {
+    /// Alias or function name
+    pub name: String,
+    /// Computed value
+    pub value: AggregateValue,
+    /// Group key (for GROUP BY queries)
+    pub group_key: Option<Vec<(String, serde_json::Value)>>,
+}
+
+/// Value types for aggregate results
+#[derive(Debug, Clone)]
+pub enum AggregateValue {
+    /// Integer count
+    Count(usize),
+    /// Floating point sum/avg/min/max
+    Float(f64),
+    /// Null (when no rows match)
+    Null,
+}
+
+/// Query execution plan (for EXPLAIN)
+#[derive(Debug, Clone)]
+pub struct QueryPlan {
+    /// Steps in the execution plan
+    pub steps: Vec<PlanStep>,
+    /// Estimated row count
+    pub estimated_rows: usize,
+    /// Indexes that would be used
+    pub indexes_used: Vec<String>,
+}
+
+/// A single step in the query plan
+#[derive(Debug, Clone)]
+pub struct PlanStep {
+    /// Step type (e.g., "TableScan", "IndexScan", "Filter", "Aggregate")
+    pub step_type: String,
+    /// Description of what this step does
+    pub description: String,
+    /// Estimated cost (0-100)
+    pub estimated_cost: u32,
 }
 
 /// Query execution statistics for analysis and optimization.
@@ -92,7 +140,7 @@ impl NodeStore {
 
         // Convert query to search filter with resolved table ID
         let mut filter = query.to_search_filter();
-        filter.table_id = Some(table_id);
+        filter.table_id = Some(table_id.clone());
 
         // Find documents using existing infrastructure
         let documents = self.find_documents(&filter)?;
@@ -116,15 +164,69 @@ impl NodeStore {
         // Get total count before pagination
         let total_count = sorted.len();
 
-        // Apply pagination
-        let paginated = if let Some(ref limit) = query.limit {
+        // Handle EXPLAIN (before pagination)
+        if query.explain {
+            let stats = QueryStats {
+                index_used: Some("idx_table_docs".to_string()),
+                rows_scanned: total_count,
+                rows_returned: 0,
+                search_executed: query.search.is_some(),
+                reason_executed: query.reason.is_some(),
+                llm_calls: 0,
+            };
+            let plan = self.build_query_plan(query, &table_id);
+            return Ok(QueryResult {
+                documents: Vec::new(),
+                total_count: 0,
+                execution_time_ms: start.elapsed().as_millis() as u64,
+                stats,
+                aggregates: None,
+                explain: Some(plan),
+            });
+        }
+
+        // Handle aggregates (on all filtered/sorted documents, before pagination)
+        if let SelectClause::Aggregates(ref aggs) = query.select {
+            // Convert sorted to DocumentMatch for aggregation (no pagination for aggregates)
+            let all_matches: Vec<DocumentMatch> = sorted
+                .into_iter()
+                .map(|doc| DocumentMatch {
+                    document: doc,
+                    score: None,
+                    matched_nodes: Vec::new(),
+                    highlights: Vec::new(),
+                    answer: None,
+                    confidence: None,
+                })
+                .collect();
+            let stats = QueryStats {
+                index_used: Some("idx_table_docs".to_string()),
+                rows_scanned: total_count,
+                rows_returned: all_matches.len(),
+                search_executed: query.search.is_some(),
+                reason_executed: query.reason.is_some(),
+                llm_calls: 0,
+            };
+            let aggregates = self.compute_aggregates(&all_matches, aggs, query.group_by.as_ref());
+            return Ok(QueryResult {
+                documents: Vec::new(),
+                total_count,
+                execution_time_ms: start.elapsed().as_millis() as u64,
+                stats,
+                aggregates: Some(aggregates),
+                explain: None,
+            });
+        }
+
+        // Apply pagination for regular queries
+        let paginated: Vec<Document> = if let Some(ref limit) = query.limit {
             let offset = limit.offset.unwrap_or(0);
             sorted.into_iter().skip(offset).take(limit.count).collect()
         } else {
             sorted
         };
 
-        // Convert to DocumentMatch
+        // Convert to DocumentMatch for regular queries
         let matches: Vec<DocumentMatch> = paginated
             .into_iter()
             .map(|doc| DocumentMatch {
@@ -152,6 +254,8 @@ impl NodeStore {
             total_count,
             execution_time_ms: start.elapsed().as_millis() as u64,
             stats,
+            aggregates: None,
+            explain: None,
         })
     }
 
@@ -292,11 +396,39 @@ impl NodeStore {
             llm_calls: 0,
         };
 
+        // Handle EXPLAIN
+        if query.explain {
+            let plan = self.build_query_plan(query, &table_id);
+            return Ok(QueryResult {
+                documents: Vec::new(),
+                total_count: 0,
+                execution_time_ms: start.elapsed().as_millis() as u64,
+                stats,
+                aggregates: None,
+                explain: Some(plan),
+            });
+        }
+
+        // Handle aggregates
+        if let SelectClause::Aggregates(ref aggs) = query.select {
+            let aggregates = self.compute_aggregates(&matches, aggs, query.group_by.as_ref());
+            return Ok(QueryResult {
+                documents: Vec::new(),
+                total_count,
+                execution_time_ms: start.elapsed().as_millis() as u64,
+                stats,
+                aggregates: Some(aggregates),
+                explain: None,
+            });
+        }
+
         Ok(QueryResult {
             documents: matches,
             total_count,
             execution_time_ms: start.elapsed().as_millis() as u64,
             stats,
+            aggregates: None,
+            explain: None,
         })
     }
 
@@ -585,6 +717,8 @@ impl NodeStore {
             total_count,
             execution_time_ms: start.elapsed().as_millis() as u64,
             stats,
+            aggregates: None,
+            explain: None,
         })
     }
 
@@ -769,6 +903,270 @@ impl NodeStore {
         // This matches SQL behavior where querying a non-existent table returns empty
         Ok(name.to_string())
     }
+
+    /// Build a query execution plan for EXPLAIN queries.
+    fn build_query_plan(&self, query: &Query, table_id: &str) -> QueryPlan {
+        let mut steps = Vec::new();
+        let mut indexes_used = Vec::new();
+
+        // Step 1: Table access
+        steps.push(PlanStep {
+            step_type: "TableScan".to_string(),
+            description: format!("Scan table '{}'", table_id),
+            estimated_cost: 10,
+        });
+        indexes_used.push("idx_table_docs".to_string());
+
+        // Step 2: Search if present
+        if let Some(ref search) = query.search {
+            steps.push(PlanStep {
+                step_type: "BM25Search".to_string(),
+                description: format!("Full-text search for '{}'", search.query),
+                estimated_cost: 20,
+            });
+            indexes_used.push("bm25_full_text".to_string());
+        }
+
+        // Step 3: Reason if present
+        if let Some(ref reason) = query.reason {
+            steps.push(PlanStep {
+                step_type: "LLMReason".to_string(),
+                description: format!("LLM semantic search for '{}'", reason.query),
+                estimated_cost: 80, // LLM is expensive
+            });
+        }
+
+        // Step 4: WHERE filtering
+        if query.where_clause.is_some() {
+            steps.push(PlanStep {
+                step_type: "Filter".to_string(),
+                description: "Apply WHERE conditions".to_string(),
+                estimated_cost: 5,
+            });
+
+            // Check for indexed fields in WHERE clause
+            if let Some(ref wc) = query.where_clause {
+                self.analyze_condition_indexes(&wc.condition, &mut indexes_used);
+            }
+        }
+
+        // Step 5: GROUP BY
+        if let Some(ref group_by) = query.group_by {
+            let fields: Vec<_> = group_by.fields.iter()
+                .filter_map(|f| f.first_field())
+                .collect();
+            steps.push(PlanStep {
+                step_type: "GroupBy".to_string(),
+                description: format!("Group by {}", fields.join(", ")),
+                estimated_cost: 15,
+            });
+        }
+
+        // Step 6: Aggregation
+        if let SelectClause::Aggregates(ref aggs) = query.select {
+            let agg_names: Vec<_> = aggs.iter()
+                .map(|a| format!("{:?}", a.function))
+                .collect();
+            steps.push(PlanStep {
+                step_type: "Aggregate".to_string(),
+                description: format!("Compute {}", agg_names.join(", ")),
+                estimated_cost: 5,
+            });
+        }
+
+        // Step 7: ORDER BY
+        if let Some(ref order_by) = query.order_by {
+            let field = order_by.field.first_field().unwrap_or("?");
+            let dir = if order_by.direction == SortDirection::Desc { "DESC" } else { "ASC" };
+            steps.push(PlanStep {
+                step_type: "Sort".to_string(),
+                description: format!("Sort by {} {}", field, dir),
+                estimated_cost: 10,
+            });
+        }
+
+        // Step 8: LIMIT
+        if let Some(ref limit) = query.limit {
+            steps.push(PlanStep {
+                step_type: "Limit".to_string(),
+                description: format!("Return {} rows (offset {})", limit.count, limit.offset.unwrap_or(0)),
+                estimated_cost: 1,
+            });
+        }
+
+        // Estimate total rows (would be based on table stats in a real DB)
+        let estimated_rows = 100; // Placeholder
+
+        QueryPlan {
+            steps,
+            estimated_rows,
+            indexes_used,
+        }
+    }
+
+    /// Analyze a condition tree for index usage.
+    fn analyze_condition_indexes(&self, condition: &Condition, indexes: &mut Vec<String>) {
+        match condition {
+            Condition::Comparison(comp) => {
+                if let Some(field) = comp.left.first_field() {
+                    match field {
+                        "table_id" => indexes.push("idx_table_docs".to_string()),
+                        "tags" => indexes.push("idx_tag_docs".to_string()),
+                        "author" => indexes.push("idx_author_docs".to_string()),
+                        _ if field.starts_with("metadata.") => {
+                            indexes.push("idx_metadata".to_string());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Condition::And(left, right) | Condition::Or(left, right) => {
+                self.analyze_condition_indexes(left, indexes);
+                self.analyze_condition_indexes(right, indexes);
+            }
+            Condition::Not(inner) => {
+                self.analyze_condition_indexes(inner, indexes);
+            }
+        }
+    }
+
+    /// Compute aggregate results.
+    fn compute_aggregates(
+        &self,
+        matches: &[DocumentMatch],
+        aggs: &[AggregateExpr],
+        group_by: Option<&GroupByClause>,
+    ) -> Vec<AggregateResult> {
+        use std::collections::HashMap;
+
+        if let Some(group_by) = group_by {
+            // GROUP BY query - compute aggregates per group
+            let mut groups: HashMap<Vec<(String, serde_json::Value)>, Vec<&DocumentMatch>> = HashMap::new();
+
+            for m in matches {
+                let key: Vec<(String, serde_json::Value)> = group_by.fields.iter()
+                    .filter_map(|f| {
+                        let field_name = f.first_field()?;
+                        let value = self.get_field_value(&m.document, f)?;
+                        Some((field_name.to_string(), value_to_json(&value)))
+                    })
+                    .collect();
+                groups.entry(key).or_default().push(m);
+            }
+
+            let mut results = Vec::new();
+            for (group_key, group_docs) in groups {
+                for agg in aggs {
+                    let result = self.compute_single_aggregate(agg, &group_docs);
+                    results.push(AggregateResult {
+                        name: result.name,
+                        value: result.value,
+                        group_key: Some(group_key.clone()),
+                    });
+                }
+            }
+            results
+        } else {
+            // No GROUP BY - compute aggregates over all rows
+            let doc_refs: Vec<&DocumentMatch> = matches.iter().collect();
+            aggs.iter()
+                .map(|agg| self.compute_single_aggregate(agg, &doc_refs))
+                .collect()
+        }
+    }
+
+    /// Compute a single aggregate function.
+    fn compute_single_aggregate(&self, agg: &AggregateExpr, docs: &[&DocumentMatch]) -> AggregateResult {
+        let name = agg.alias.clone().unwrap_or_else(|| {
+            match &agg.function {
+                AggregateFunction::Count(_) => "count".to_string(),
+                AggregateFunction::Sum(f) => format!("sum_{}", f.first_field().unwrap_or("?")),
+                AggregateFunction::Avg(f) => format!("avg_{}", f.first_field().unwrap_or("?")),
+                AggregateFunction::Min(f) => format!("min_{}", f.first_field().unwrap_or("?")),
+                AggregateFunction::Max(f) => format!("max_{}", f.first_field().unwrap_or("?")),
+            }
+        });
+
+        let value = match &agg.function {
+            AggregateFunction::Count(field) => {
+                if let Some(f) = field {
+                    // COUNT(field) - count non-null values
+                    let count = docs.iter()
+                        .filter(|m| self.get_field_value(&m.document, f).is_some())
+                        .count();
+                    AggregateValue::Count(count)
+                } else {
+                    // COUNT(*) - count all rows
+                    AggregateValue::Count(docs.len())
+                }
+            }
+            AggregateFunction::Sum(field) => {
+                let sum: f64 = docs.iter()
+                    .filter_map(|m| {
+                        if let Some(Value::Number(n)) = self.get_field_value(&m.document, field) {
+                            Some(n)
+                        } else {
+                            None
+                        }
+                    })
+                    .sum();
+                AggregateValue::Float(sum)
+            }
+            AggregateFunction::Avg(field) => {
+                let values: Vec<f64> = docs.iter()
+                    .filter_map(|m| {
+                        if let Some(Value::Number(n)) = self.get_field_value(&m.document, field) {
+                            Some(n)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if values.is_empty() {
+                    AggregateValue::Null
+                } else {
+                    let sum: f64 = values.iter().sum();
+                    AggregateValue::Float(sum / values.len() as f64)
+                }
+            }
+            AggregateFunction::Min(field) => {
+                let min = docs.iter()
+                    .filter_map(|m| {
+                        if let Some(Value::Number(n)) = self.get_field_value(&m.document, field) {
+                            Some(n)
+                        } else {
+                            None
+                        }
+                    })
+                    .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                match min {
+                    Some(v) => AggregateValue::Float(v),
+                    None => AggregateValue::Null,
+                }
+            }
+            AggregateFunction::Max(field) => {
+                let max = docs.iter()
+                    .filter_map(|m| {
+                        if let Some(Value::Number(n)) = self.get_field_value(&m.document, field) {
+                            Some(n)
+                        } else {
+                            None
+                        }
+                    })
+                    .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                match max {
+                    Some(v) => AggregateValue::Float(v),
+                    None => AggregateValue::Null,
+                }
+            }
+        };
+
+        AggregateResult {
+            name,
+            value,
+            group_key: None,
+        }
+    }
 }
 
 /// Convert serde_json::Value to RQL Value.
@@ -780,5 +1178,16 @@ fn json_to_value(json: &serde_json::Value) -> Value {
         serde_json::Value::String(s) => Value::String(s.clone()),
         serde_json::Value::Array(arr) => Value::Array(arr.iter().map(json_to_value).collect()),
         serde_json::Value::Object(_) => Value::Null, // Objects not supported as values
+    }
+}
+
+/// Convert RQL Value to serde_json::Value.
+fn value_to_json(value: &Value) -> serde_json::Value {
+    match value {
+        Value::Null => serde_json::Value::Null,
+        Value::Bool(b) => serde_json::Value::Bool(*b),
+        Value::Number(n) => serde_json::json!(*n),
+        Value::String(s) => serde_json::Value::String(s.clone()),
+        Value::Array(arr) => serde_json::Value::Array(arr.iter().map(value_to_json).collect()),
     }
 }

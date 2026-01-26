@@ -54,7 +54,13 @@ fn test_parse_simple_select() {
 #[test]
 fn test_parse_select_count() {
     let query = Query::parse("SELECT COUNT(*) FROM legal").unwrap();
-    assert!(matches!(query.select, SelectClause::Count));
+    match &query.select {
+        SelectClause::Aggregates(aggs) => {
+            assert_eq!(aggs.len(), 1);
+            assert!(matches!(aggs[0].function, AggregateFunction::Count(None)));
+        }
+        _ => panic!("Expected Aggregates"),
+    }
 }
 
 #[test]
@@ -407,4 +413,138 @@ fn test_execute_search_no_index() {
     // Should return all documents (no search filtering without index)
     assert!(!result.stats.search_executed);
     assert_eq!(result.total_count, 3);
+}
+
+// ==================== Aggregate Tests ====================
+
+#[test]
+fn test_parse_aggregates() {
+    // COUNT(*)
+    let query = Query::parse("SELECT COUNT(*) FROM legal").unwrap();
+    match &query.select {
+        SelectClause::Aggregates(aggs) => {
+            assert_eq!(aggs.len(), 1);
+            assert!(matches!(aggs[0].function, AggregateFunction::Count(None)));
+        }
+        _ => panic!("Expected Aggregates"),
+    }
+
+    // Multiple aggregates
+    let query = Query::parse("SELECT COUNT(*), MIN(metadata.value), MAX(metadata.value) FROM legal").unwrap();
+    match &query.select {
+        SelectClause::Aggregates(aggs) => {
+            assert_eq!(aggs.len(), 3);
+            assert!(matches!(aggs[0].function, AggregateFunction::Count(None)));
+            assert!(matches!(aggs[1].function, AggregateFunction::Min(_)));
+            assert!(matches!(aggs[2].function, AggregateFunction::Max(_)));
+        }
+        _ => panic!("Expected Aggregates"),
+    }
+
+    // Aggregate with alias
+    let query = Query::parse("SELECT COUNT(*) AS total FROM legal").unwrap();
+    match &query.select {
+        SelectClause::Aggregates(aggs) => {
+            assert_eq!(aggs.len(), 1);
+            assert_eq!(aggs[0].alias, Some("total".to_string()));
+        }
+        _ => panic!("Expected Aggregates"),
+    }
+}
+
+#[test]
+fn test_parse_group_by() {
+    let query = Query::parse("SELECT COUNT(*) FROM legal GROUP BY author").unwrap();
+    assert!(query.group_by.is_some());
+    let group_by = query.group_by.unwrap();
+    assert_eq!(group_by.fields.len(), 1);
+    assert_eq!(group_by.fields[0].first_field(), Some("author"));
+}
+
+#[test]
+fn test_parse_explain() {
+    let query = Query::parse("EXPLAIN SELECT * FROM legal").unwrap();
+    assert!(query.explain);
+    assert!(matches!(query.select, SelectClause::All));
+
+    let query = Query::parse("SELECT * FROM legal").unwrap();
+    assert!(!query.explain);
+}
+
+#[test]
+fn test_execute_count() {
+    let (store, _dir) = create_test_store();
+    setup_test_data(&store);
+
+    let query = Query::parse("SELECT COUNT(*) FROM legal").unwrap();
+    let result = store.execute_rql(&query).unwrap();
+
+    assert!(result.aggregates.is_some());
+    let aggs = result.aggregates.unwrap();
+    assert_eq!(aggs.len(), 1);
+    match &aggs[0].value {
+        AggregateValue::Count(count) => assert_eq!(*count, 3),
+        _ => panic!("Expected Count"),
+    }
+}
+
+#[test]
+fn test_execute_count_with_filter() {
+    let (store, _dir) = create_test_store();
+    setup_test_data(&store);
+
+    // Note: Author names are case-sensitive ("Alice" not "alice")
+    let query = Query::parse("SELECT COUNT(*) FROM legal WHERE author = 'Alice'").unwrap();
+    let result = store.execute_rql(&query).unwrap();
+
+    assert!(result.aggregates.is_some());
+    let aggs = result.aggregates.unwrap();
+    match &aggs[0].value {
+        AggregateValue::Count(count) => assert_eq!(*count, 2), // Alice has 2 documents
+        _ => panic!("Expected Count"),
+    }
+}
+
+#[test]
+fn test_execute_explain() {
+    let (store, _dir) = create_test_store();
+    setup_test_data(&store);
+
+    let query = Query::parse("EXPLAIN SELECT * FROM legal WHERE author = 'alice'").unwrap();
+    let result = store.execute_rql(&query).unwrap();
+
+    assert!(result.explain.is_some());
+    let plan = result.explain.unwrap();
+    
+    // Should have multiple steps
+    assert!(!plan.steps.is_empty());
+    
+    // Should include TableScan
+    assert!(plan.steps.iter().any(|s| s.step_type == "TableScan"));
+    
+    // Should include Filter for WHERE clause
+    assert!(plan.steps.iter().any(|s| s.step_type == "Filter"));
+    
+    // Should list indexes used
+    assert!(!plan.indexes_used.is_empty());
+}
+
+#[test]
+fn test_execute_group_by() {
+    let (store, _dir) = create_test_store();
+    setup_test_data(&store);
+
+    let query = Query::parse("SELECT COUNT(*) FROM legal GROUP BY author").unwrap();
+    let result = store.execute_rql(&query).unwrap();
+
+    assert!(result.aggregates.is_some());
+    let aggs = result.aggregates.unwrap();
+    
+    // Should have groups - one for alice (2 docs), one for bob (1 doc)
+    assert!(aggs.len() >= 2);
+    
+    // Each result should have a group_key
+    for agg in &aggs {
+        assert!(agg.group_key.is_some());
+    }
 }

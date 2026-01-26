@@ -20,11 +20,15 @@ impl Parser {
 
     /// Parse the tokens into a Query AST.
     pub fn parse(&mut self) -> RqlResult<Query> {
+        // Check for EXPLAIN prefix
+        let explain = self.parse_explain()?;
+
         let select = self.parse_select()?;
         let from = self.parse_from()?;
         let where_clause = self.parse_where()?;
         let search = self.parse_search_clause()?;
         let reason = self.parse_reason_clause()?;
+        let group_by = self.parse_group_by()?;
         let order_by = self.parse_order_by()?;
         let limit = self.parse_limit()?;
 
@@ -36,14 +40,27 @@ impl Parser {
         }
 
         Ok(Query {
+            explain,
             select,
             from,
             where_clause,
             search,
             reason,
+            group_by,
             order_by,
             limit,
         })
+    }
+
+    // ==================== EXPLAIN ====================
+
+    fn parse_explain(&mut self) -> RqlResult<bool> {
+        if self.check(&Token::Explain) {
+            self.advance();
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     // ==================== SELECT ====================
@@ -56,12 +73,9 @@ impl Parser {
             return Ok(SelectClause::All);
         }
 
-        if self.check(&Token::Count) {
-            self.advance();
-            self.expect(Token::LParen)?;
-            self.expect(Token::Star)?;
-            self.expect(Token::RParen)?;
-            return Ok(SelectClause::Count);
+        // Check if this is an aggregate query
+        if self.is_aggregate_function() {
+            return self.parse_aggregates();
         }
 
         // Parse field list
@@ -83,6 +97,89 @@ impl Parser {
         }
 
         Ok(SelectClause::Fields(fields))
+    }
+
+    fn is_aggregate_function(&self) -> bool {
+        matches!(
+            self.current(),
+            Token::Count | Token::Sum | Token::Avg | Token::Min | Token::Max
+        )
+    }
+
+    fn parse_aggregates(&mut self) -> RqlResult<SelectClause> {
+        let mut aggregates = Vec::new();
+
+        loop {
+            let agg = self.parse_single_aggregate()?;
+            aggregates.push(agg);
+
+            if !self.check(&Token::Comma) {
+                break;
+            }
+            self.advance(); // consume comma
+        }
+
+        Ok(SelectClause::Aggregates(aggregates))
+    }
+
+    fn parse_single_aggregate(&mut self) -> RqlResult<AggregateExpr> {
+        let function = match self.current() {
+            Token::Count => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let field = if self.check(&Token::Star) {
+                    self.advance();
+                    None
+                } else {
+                    Some(self.parse_field_path()?)
+                };
+                self.expect(Token::RParen)?;
+                AggregateFunction::Count(field)
+            }
+            Token::Sum => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let field = self.parse_field_path()?;
+                self.expect(Token::RParen)?;
+                AggregateFunction::Sum(field)
+            }
+            Token::Avg => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let field = self.parse_field_path()?;
+                self.expect(Token::RParen)?;
+                AggregateFunction::Avg(field)
+            }
+            Token::Min => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let field = self.parse_field_path()?;
+                self.expect(Token::RParen)?;
+                AggregateFunction::Min(field)
+            }
+            Token::Max => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let field = self.parse_field_path()?;
+                self.expect(Token::RParen)?;
+                AggregateFunction::Max(field)
+            }
+            _ => {
+                return Err(ParserError::new("Expected aggregate function")
+                    .found(format!("{:?}", self.current()))
+                    .into());
+            }
+        };
+
+        // Optional alias
+        let alias = if self.check(&Token::As) {
+            self.advance();
+            Some(self.parse_identifier()?)
+        } else {
+            None
+        };
+
+        Ok(AggregateExpr { function, alias })
     }
 
     // ==================== FROM ====================
@@ -299,6 +396,29 @@ impl Parser {
             }));
         }
         Ok(None)
+    }
+
+    // ==================== GROUP BY ====================
+
+    fn parse_group_by(&mut self) -> RqlResult<Option<GroupByClause>> {
+        if !self.check(&Token::Group) {
+            return Ok(None);
+        }
+        self.advance();
+        self.expect(Token::By)?;
+
+        let mut fields = Vec::new();
+        loop {
+            let field = self.parse_field_path()?;
+            fields.push(field);
+
+            if !self.check(&Token::Comma) {
+                break;
+            }
+            self.advance(); // consume comma
+        }
+
+        Ok(Some(GroupByClause { fields }))
     }
 
     // ==================== ORDER BY ====================

@@ -27,14 +27,15 @@
 //!
 //! ```no_run
 //! use reasondb_server::{AppState, ServerConfig, create_server};
-//! use reasondb_core::{store::NodeStore, llm::mock::MockReasoner};
+//! use reasondb_core::{store::NodeStore, llm::mock::MockReasoner, TextIndex};
 //!
 //! #[tokio::main]
 //! async fn main() {
 //!     let config = ServerConfig::default();
 //!     let store = NodeStore::open(&config.db_path).unwrap();
+//!     let text_index = TextIndex::open("./search_index").unwrap();
 //!     let reasoner = MockReasoner::new();
-//!     let state = AppState::new(store, reasoner, config.clone());
+//!     let state = AppState::new(store, text_index, reasoner, config.clone());
 //!     
 //!     // Server would be started here
 //! }

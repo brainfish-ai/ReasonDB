@@ -4,7 +4,7 @@
 
 use axum::{extract::State, Json};
 use reasondb_core::llm::ReasoningEngine;
-use reasondb_core::rql::{DocumentMatch, Query, QueryResult, QueryStats};
+use reasondb_core::rql::{AggregateValue, DocumentMatch, Query, QueryResult, QueryStats};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utoipa::ToSchema;
@@ -34,6 +34,48 @@ pub struct QueryResponse {
 
     /// Execution time in milliseconds
     pub execution_time_ms: u64,
+
+    /// Aggregate results (for COUNT/SUM/AVG queries)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aggregates: Option<Vec<AggregateResultResponse>>,
+
+    /// Query plan (for EXPLAIN queries)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explain: Option<QueryPlanResponse>,
+}
+
+/// Aggregate result in query response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AggregateResultResponse {
+    /// Alias or function name
+    pub name: String,
+    /// Computed value
+    pub value: serde_json::Value,
+    /// Group key (for GROUP BY queries)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_key: Option<Vec<(String, serde_json::Value)>>,
+}
+
+/// Query execution plan
+#[derive(Debug, Serialize, ToSchema)]
+pub struct QueryPlanResponse {
+    /// Steps in the execution plan
+    pub steps: Vec<PlanStepResponse>,
+    /// Estimated row count
+    pub estimated_rows: usize,
+    /// Indexes that would be used
+    pub indexes_used: Vec<String>,
+}
+
+/// A single step in the query plan
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PlanStepResponse {
+    /// Step type (e.g., "TableScan", "IndexScan", "Filter", "Aggregate")
+    pub step_type: String,
+    /// Description of what this step does
+    pub description: String,
+    /// Estimated cost (0-100)
+    pub estimated_cost: u32,
 }
 
 /// A matched document in query results
@@ -91,6 +133,32 @@ impl From<QueryResult> for QueryResponse {
             documents: r.documents.into_iter().map(|m| m.into()).collect(),
             total_count: r.total_count,
             execution_time_ms: r.execution_time_ms,
+            aggregates: r.aggregates.map(|aggs| {
+                aggs.into_iter()
+                    .map(|a| AggregateResultResponse {
+                        name: a.name,
+                        value: match a.value {
+                            AggregateValue::Count(c) => serde_json::json!(c),
+                            AggregateValue::Float(f) => serde_json::json!(f),
+                            AggregateValue::Null => serde_json::Value::Null,
+                        },
+                        group_key: a.group_key,
+                    })
+                    .collect()
+            }),
+            explain: r.explain.map(|p| QueryPlanResponse {
+                steps: p
+                    .steps
+                    .into_iter()
+                    .map(|s| PlanStepResponse {
+                        step_type: s.step_type,
+                        description: s.description,
+                        estimated_cost: s.estimated_cost,
+                    })
+                    .collect(),
+                estimated_rows: p.estimated_rows,
+                indexes_used: p.indexes_used,
+            }),
         }
     }
 }
@@ -176,6 +244,8 @@ pub async fn execute_query<R: ReasoningEngine + Send + Sync + 'static>(
                     reason_executed: false, // Already done
                     llm_calls: 0, // Cached
                 },
+                aggregates: None,
+                explain: None,
             }
         } else {
             // Cache miss - execute query

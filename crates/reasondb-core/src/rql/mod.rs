@@ -38,7 +38,9 @@ mod tests;
 // Re-export public types
 pub use ast::*;
 pub use error::{RqlError, RqlResult};
-pub use executor::{DocumentMatch, QueryResult, QueryStats};
+pub use executor::{
+    AggregateResult, AggregateValue, DocumentMatch, PlanStep, QueryPlan, QueryResult, QueryStats,
+};
 
 use crate::model::SearchFilter;
 
@@ -309,11 +311,13 @@ impl QueryBuilder {
         });
 
         Ok(Query {
+            explain: false,
             select: self.select.unwrap_or(SelectClause::All),
             from: FromClause { table: from },
             where_clause,
             search: self.search,
             reason: self.reason,
+            group_by: None,
             order_by: self.order_by,
             limit: limit_clause,
         })

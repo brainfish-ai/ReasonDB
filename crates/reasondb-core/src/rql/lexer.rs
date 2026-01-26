@@ -26,13 +26,21 @@ pub enum Token {
     With,
     Confidence,
     Order,
+    Group,
     By,
     Asc,
     Desc,
     Limit,
     Offset,
     As,
+    Explain,
+    // Aggregate functions
     Count,
+    Sum,
+    Avg,
+    Min,
+    Max,
+    // Boolean literals
     True,
     False,
 
@@ -85,13 +93,19 @@ impl Token {
                 | Token::With
                 | Token::Confidence
                 | Token::Order
+                | Token::Group
                 | Token::By
                 | Token::Asc
                 | Token::Desc
                 | Token::Limit
                 | Token::Offset
                 | Token::As
+                | Token::Explain
                 | Token::Count
+                | Token::Sum
+                | Token::Avg
+                | Token::Min
+                | Token::Max
                 | Token::True
                 | Token::False
         )
@@ -328,13 +342,19 @@ impl Lexer {
             "WITH" => Token::With,
             "CONFIDENCE" => Token::Confidence,
             "ORDER" => Token::Order,
+            "GROUP" => Token::Group,
             "BY" => Token::By,
             "ASC" => Token::Asc,
             "DESC" => Token::Desc,
             "LIMIT" => Token::Limit,
             "OFFSET" => Token::Offset,
             "AS" => Token::As,
+            "EXPLAIN" => Token::Explain,
             "COUNT" => Token::Count,
+            "SUM" => Token::Sum,
+            "AVG" => Token::Avg,
+            "MIN" => Token::Min,
+            "MAX" => Token::Max,
             "TRUE" => Token::True,
             "FALSE" => Token::False,
             _ => Token::Identifier(value),

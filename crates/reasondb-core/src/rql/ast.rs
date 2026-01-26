@@ -8,6 +8,9 @@ use std::fmt;
 /// A complete parsed RQL query.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {
+    /// Whether this is an EXPLAIN query
+    pub explain: bool,
+
     /// SELECT clause (what to return)
     pub select: SelectClause,
 
@@ -23,11 +26,23 @@ pub struct Query {
     /// Optional REASON clause (LLM semantic search) - can be combined with SEARCH
     pub reason: Option<ReasonClause>,
 
+    /// Optional GROUP BY clause
+    pub group_by: Option<GroupByClause>,
+
     /// Optional ORDER BY clause
     pub order_by: Option<OrderByClause>,
 
     /// Optional LIMIT clause
     pub limit: Option<LimitClause>,
+}
+
+// ==================== GROUP BY ====================
+
+/// GROUP BY clause for aggregations.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GroupByClause {
+    /// Fields to group by
+    pub fields: Vec<FieldPath>,
 }
 
 // ==================== SELECT ====================
@@ -41,8 +56,8 @@ pub enum SelectClause {
     /// SELECT field1, field2 - return specific fields
     Fields(Vec<FieldSelector>),
 
-    /// SELECT COUNT(*) - return count
-    Count,
+    /// SELECT with aggregate functions (COUNT, SUM, AVG, etc.)
+    Aggregates(Vec<AggregateExpr>),
 }
 
 /// A single field selector with optional alias.
@@ -53,6 +68,30 @@ pub struct FieldSelector {
 
     /// Optional alias (e.g., AS status)
     pub alias: Option<String>,
+}
+
+/// Aggregate function expression
+#[derive(Debug, Clone, PartialEq)]
+pub struct AggregateExpr {
+    /// The aggregate function
+    pub function: AggregateFunction,
+    /// Optional alias (e.g., AS total_count)
+    pub alias: Option<String>,
+}
+
+/// Supported aggregate functions
+#[derive(Debug, Clone, PartialEq)]
+pub enum AggregateFunction {
+    /// COUNT(*) or COUNT(field)
+    Count(Option<FieldPath>),
+    /// SUM(field)
+    Sum(FieldPath),
+    /// AVG(field)
+    Avg(FieldPath),
+    /// MIN(field)
+    Min(FieldPath),
+    /// MAX(field)
+    Max(FieldPath),
 }
 
 // ==================== FROM ====================
