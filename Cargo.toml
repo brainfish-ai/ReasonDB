@@ -38,6 +38,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 regex = "1.10"
 
+# Full-text search (BM25)
+tantivy = "0.22"
+
 # HTTP client (for LLM APIs)
 reqwest = { version = "0.12", features = ["json"] }
 url = "2.5"

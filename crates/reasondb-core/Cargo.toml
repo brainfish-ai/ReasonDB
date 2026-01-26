@@ -15,6 +15,9 @@ bincode.workspace = true
 # Storage
 redb.workspace = true
 
+# Full-text search (BM25)
+tantivy.workspace = true
+
 # Async
 tokio.workspace = true
 async-trait.workspace = true

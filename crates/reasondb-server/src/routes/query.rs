@@ -87,12 +87,21 @@ impl From<QueryResult> for QueryResponse {
 
 /// Execute an RQL query
 ///
+/// Supports filtering with WHERE clauses and full-text search with SEARCH clause.
+/// When SEARCH is used, results are ranked by BM25 relevance score.
+///
 /// # Example
 ///
 /// ```bash
-/// curl -X POST http://localhost:3000/v1/query \
+/// # Filter query
+/// curl -X POST http://localhost:4444/v1/query \
 ///   -H "Content-Type: application/json" \
 ///   -d '{"query": "SELECT * FROM legal_contracts WHERE author = '\''Alice'\'' LIMIT 10"}'
+///
+/// # Full-text search with BM25
+/// curl -X POST http://localhost:4444/v1/query \
+///   -H "Content-Type: application/json" \
+///   -d '{"query": "SELECT * FROM legal_contracts SEARCH '\''payment terms'\''"}'
 /// ```
 #[utoipa::path(
     post,
@@ -113,10 +122,10 @@ pub async fn execute_query<R: ReasoningEngine>(
     let query = Query::parse(&request.query)
         .map_err(|e| ApiError::BadRequest(format!("Invalid query: {}", e)))?;
 
-    // Execute the query
+    // Execute the query with BM25 text search support
     let result = state
         .store
-        .execute_rql(&query)
+        .execute_rql_with_search(&query, Some(state.text_index.as_ref()))
         .map_err(|e| ApiError::Internal(format!("Query execution failed: {}", e)))?;
 
     Ok(Json(result.into()))

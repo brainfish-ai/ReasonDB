@@ -6,6 +6,7 @@ use clap::Parser;
 use reasondb_core::{
     llm::{mock::MockReasoner, provider::LLMProvider, provider::Reasoner},
     store::NodeStore,
+    text_index::TextIndex,
 };
 use reasondb_server::{create_server, AppState, ServerConfig};
 use std::sync::Arc;
@@ -71,6 +72,11 @@ async fn main() -> anyhow::Result<()> {
     info!("Opening database: {}", args.database);
     let store = NodeStore::open(&args.database)?;
 
+    // Open or create text index for BM25 search
+    let text_index_path = format!("{}.idx", args.database);
+    info!("Opening text index: {}", text_index_path);
+    let text_index = TextIndex::open(&text_index_path)?;
+
     // Create server config
     let config = ServerConfig {
         host: args.host.clone(),
@@ -87,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
     if let Some(api_key) = args.openai_key {
         info!("Using OpenAI provider (gpt-4o model)");
         let reasoner = Reasoner::new(LLMProvider::openai(&api_key));
-        let state = Arc::new(AppState::new(store, reasoner, config));
+        let state = Arc::new(AppState::new(store, text_index, reasoner, config));
         let app = create_server(state);
 
         info!("Server listening on http://{}", addr);
@@ -102,7 +108,7 @@ async fn main() -> anyhow::Result<()> {
             LLMProvider::claude_sonnet(&api_key)
         };
         let reasoner = Reasoner::new(provider);
-        let state = Arc::new(AppState::new(store, reasoner, config));
+        let state = Arc::new(AppState::new(store, text_index, reasoner, config));
         let app = create_server(state);
 
         info!("Server listening on http://{}", addr);
@@ -111,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
     } else {
         info!("No API key provided - using mock reasoner (summaries will be placeholder text)");
         let reasoner = MockReasoner::new();
-        let state = Arc::new(AppState::new(store, reasoner, config));
+        let state = Arc::new(AppState::new(store, text_index, reasoner, config));
         let app = create_server(state);
 
         info!("Server listening on http://{}", addr);

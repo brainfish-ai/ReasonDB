@@ -1,10 +1,18 @@
 //! RQL Query Executor
 //!
 //! Executes parsed RQL queries against the NodeStore.
+//!
+//! # Execution Methods
+//!
+//! - `execute_rql()` - Basic execution for filter-only queries
+//! - `execute_rql_with_search()` - Execution with BM25 full-text search support
 
+use std::collections::HashSet;
+
+use crate::error::Result;
 use crate::model::{Document, NodeId};
 use crate::store::NodeStore;
-use crate::error::Result;
+use crate::text_index::TextIndex;
 
 use super::ast::*;
 
@@ -17,6 +25,25 @@ pub struct QueryResult {
     pub total_count: usize,
     /// Execution time in milliseconds
     pub execution_time_ms: u64,
+    /// Query execution statistics
+    pub stats: QueryStats,
+}
+
+/// Query execution statistics for analysis and optimization.
+#[derive(Debug, Clone, Default)]
+pub struct QueryStats {
+    /// Index used for initial filtering
+    pub index_used: Option<String>,
+    /// Total rows scanned
+    pub rows_scanned: usize,
+    /// Rows returned after filtering
+    pub rows_returned: usize,
+    /// Whether SEARCH clause was executed
+    pub search_executed: bool,
+    /// Whether REASON clause was executed
+    pub reason_executed: bool,
+    /// Number of LLM calls made (for REASON)
+    pub llm_calls: usize,
 }
 
 /// A document match with relevance info.
@@ -100,10 +127,164 @@ impl NodeStore {
             })
             .collect();
 
+        // Build stats
+        let stats = QueryStats {
+            index_used: Some("idx_table_docs".to_string()),
+            rows_scanned: total_count,
+            rows_returned: matches.len(),
+            search_executed: query.search.is_some(),
+            reason_executed: matches!(query.search, Some(SearchClause::Semantic { .. })),
+            llm_calls: 0,
+        };
+
         Ok(QueryResult {
             documents: matches,
             total_count,
             execution_time_ms: start.elapsed().as_millis() as u64,
+            stats,
+        })
+    }
+
+    /// Execute an RQL query with full-text search support.
+    ///
+    /// This method supports the SEARCH clause using BM25 ranking.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The parsed RQL query
+    /// * `text_index` - Optional TextIndex for BM25 search
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use reasondb_core::{NodeStore, TextIndex, rql::Query};
+    ///
+    /// let store = NodeStore::open("./test.db").unwrap();
+    /// let text_index = TextIndex::open("./search_index").unwrap();
+    /// let query = Query::parse("SELECT * FROM legal_contracts SEARCH 'payment terms'").unwrap();
+    /// let result = store.execute_rql_with_search(&query, Some(&text_index)).unwrap();
+    /// ```
+    pub fn execute_rql_with_search(
+        &self,
+        query: &Query,
+        text_index: Option<&TextIndex>,
+    ) -> Result<QueryResult> {
+        let start = std::time::Instant::now();
+
+        // Resolve table name to ID
+        let table_id = self.resolve_table_id(&query.from.table)?;
+
+        // Check if we have a SEARCH clause and a text index
+        let search_results = if let (Some(SearchClause::FullText(search_query)), Some(index)) =
+            (&query.search, text_index)
+        {
+            // Execute BM25 search
+            let results = index.search(search_query, 1000, Some(&table_id))?;
+            Some(results)
+        } else {
+            None
+        };
+
+        // Get documents either from search results or filter
+        let documents = if let Some(ref search_hits) = search_results {
+            // Get documents from search results, preserving BM25 order
+            let mut docs = Vec::new();
+            let seen: HashSet<String> = HashSet::new();
+            for hit in search_hits {
+                if seen.contains(&hit.document_id) {
+                    continue;
+                }
+                if let Ok(Some(doc)) = self.get_document(&hit.document_id) {
+                    docs.push((doc, hit.score, hit.snippet.clone()));
+                }
+            }
+            docs
+        } else {
+            // Fall back to filter-based search
+            let mut filter = query.to_search_filter();
+            filter.table_id = Some(table_id.clone());
+            let docs = self.find_documents(&filter)?;
+            docs.into_iter().map(|d| (d, 0.0, None)).collect()
+        };
+
+        // Apply additional WHERE filtering
+        let filtered: Vec<(Document, f32, Option<String>)> = if let Some(ref where_clause) = query.where_clause {
+            documents
+                .into_iter()
+                .filter(|(doc, _, _)| self.matches_condition(doc, &where_clause.condition))
+                .collect()
+        } else {
+            documents
+        };
+
+        // Sort - use BM25 score if search, otherwise by field
+        let mut sorted = filtered;
+        if search_results.is_none() {
+            if let Some(ref order_by) = query.order_by {
+                sorted.sort_by(|(a, _, _), (b, _, _)| {
+                    let field = order_by.field.first_field().unwrap_or("");
+                    let cmp = match field {
+                        "title" => a.title.cmp(&b.title),
+                        "created_at" => a.created_at.cmp(&b.created_at),
+                        "updated_at" => a.updated_at.cmp(&b.updated_at),
+                        "author" => a.author.cmp(&b.author),
+                        _ => std::cmp::Ordering::Equal,
+                    };
+                    if order_by.direction == SortDirection::Desc {
+                        cmp.reverse()
+                    } else {
+                        cmp
+                    }
+                });
+            }
+        }
+        // BM25 results are already sorted by relevance (desc)
+
+        // Get total count before pagination
+        let total_count = sorted.len();
+
+        // Apply pagination
+        let paginated: Vec<(Document, f32, Option<String>)> = if let Some(ref limit) = query.limit {
+            let offset = limit.offset.unwrap_or(0);
+            sorted.into_iter().skip(offset).take(limit.count).collect()
+        } else {
+            sorted
+        };
+
+        // Convert to DocumentMatch with scores and highlights
+        let matches: Vec<DocumentMatch> = paginated
+            .into_iter()
+            .map(|(doc, score, snippet)| DocumentMatch {
+                document: doc,
+                score: if search_results.is_some() {
+                    Some(score)
+                } else {
+                    None
+                },
+                matched_nodes: Vec::new(),
+                highlights: snippet.into_iter().collect(),
+            })
+            .collect();
+
+        // Build stats
+        let stats = QueryStats {
+            index_used: if search_results.is_some() {
+                Some("bm25_full_text".to_string())
+            } else {
+                Some("idx_table_docs".to_string())
+            },
+            rows_scanned: total_count,
+            rows_returned: matches.len(),
+            search_executed: search_results.is_some(),
+            reason_executed: matches!(query.search, Some(SearchClause::Semantic { .. })),
+            llm_calls: 0,
+        };
+
+        Ok(QueryResult {
+            documents: matches,
+            total_count,
+            execution_time_ms: start.elapsed().as_millis() as u64,
+            stats,
         })
     }
 

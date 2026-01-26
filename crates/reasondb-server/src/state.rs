@@ -5,6 +5,7 @@
 use reasondb_core::{
     llm::{mock::MockReasoner, provider::Reasoner, ReasoningEngine},
     store::NodeStore,
+    text_index::TextIndex,
 };
 use std::sync::Arc;
 
@@ -12,6 +13,8 @@ use std::sync::Arc;
 pub struct AppState<R: ReasoningEngine = Reasoner> {
     /// Database store
     pub store: Arc<NodeStore>,
+    /// Full-text search index (BM25)
+    pub text_index: Arc<TextIndex>,
     /// LLM reasoning engine
     pub reasoner: Arc<R>,
     /// Server configuration
@@ -20,9 +23,10 @@ pub struct AppState<R: ReasoningEngine = Reasoner> {
 
 impl<R: ReasoningEngine> AppState<R> {
     /// Create new app state
-    pub fn new(store: NodeStore, reasoner: R, config: ServerConfig) -> Self {
+    pub fn new(store: NodeStore, text_index: TextIndex, reasoner: R, config: ServerConfig) -> Self {
         Self {
             store: Arc::new(store),
+            text_index: Arc::new(text_index),
             reasoner: Arc::new(reasoner),
             config,
         }

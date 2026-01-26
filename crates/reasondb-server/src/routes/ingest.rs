@@ -7,6 +7,8 @@ use axum::{
     Json,
 };
 use reasondb_core::llm::ReasoningEngine;
+use reasondb_core::text_index::TextIndex;
+use reasondb_core::NodeStore;
 use reasondb_ingest::{IngestPipeline, PipelineConfig};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -18,6 +20,54 @@ use crate::{
     error::{ApiError, ApiResult, ErrorResponse},
     state::AppState,
 };
+
+/// Index all nodes of a document in the text index for BM25 search.
+fn index_document_nodes(
+    text_index: &TextIndex,
+    store: &NodeStore,
+    document_id: &str,
+    table_id: &str,
+    author: Option<&str>,
+    tags: &[String],
+) -> Result<(), ApiError> {
+    // Get all nodes for this document
+    let nodes = store
+        .get_nodes_for_document(document_id)
+        .map_err(|e| ApiError::Internal(format!("Failed to get document nodes: {}", e)))?;
+
+    // Index each node that has content
+    for node in &nodes {
+        // Skip nodes without content
+        let content = match &node.content {
+            Some(c) => c.as_str(),
+            None => continue,
+        };
+
+        text_index
+            .index_node(
+                document_id,
+                &node.id,
+                table_id,
+                &node.title,
+                content,
+                author,
+                tags,
+            )
+            .map_err(|e| ApiError::Internal(format!("Failed to index node: {}", e)))?;
+    }
+
+    // Commit the index
+    text_index
+        .commit()
+        .map_err(|e| ApiError::Internal(format!("Failed to commit text index: {}", e)))?;
+
+    debug!(
+        "Indexed {} nodes for document {} in BM25 index",
+        nodes.len(),
+        document_id
+    );
+    Ok(())
+}
 
 /// Response for ingestion operations
 #[derive(Debug, Serialize, ToSchema)]
@@ -216,6 +266,16 @@ pub async fn ingest_file<R: ReasoningEngine + Clone + Send + Sync + 'static>(
     // Clean up temp file
     let _ = std::fs::remove_file(&temp_path);
 
+    // Index document content for BM25 search
+    index_document_nodes(
+        &state.text_index,
+        &state.store,
+        &result.document.id,
+        &result.document.table_id,
+        result.document.author.as_deref(),
+        &result.document.tags,
+    )?;
+
     debug!("Ingestion complete: {} nodes created", result.stats.nodes_created);
 
     Ok(Json(IngestResponse {
@@ -307,6 +367,16 @@ pub async fn ingest_text<R: ReasoningEngine + Clone + Send + Sync + 'static>(
         result.document = doc;
     }
 
+    // Index document content for BM25 search
+    index_document_nodes(
+        &state.text_index,
+        &state.store,
+        &result.document.id,
+        &result.document.table_id,
+        result.document.author.as_deref(),
+        &result.document.tags,
+    )?;
+
     Ok(Json(IngestResponse {
         document_id: result.document.id.clone(),
         title: result.document.title.clone(),
@@ -369,6 +439,16 @@ pub async fn ingest_url<R: ReasoningEngine + Clone + Send + Sync + 'static>(
         .ingest_url_and_store(&request.url, &request.table_id, &state.store)
         .await
         .map_err(ApiError::from)?;
+
+    // Index document content for BM25 search
+    index_document_nodes(
+        &state.text_index,
+        &state.store,
+        &result.document.id,
+        &result.document.table_id,
+        result.document.author.as_deref(),
+        &result.document.tags,
+    )?;
 
     Ok(Json(IngestResponse {
         document_id: result.document.id.clone(),

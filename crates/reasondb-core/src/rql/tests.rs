@@ -299,3 +299,86 @@ fn test_builder_error_missing_from() {
     let result = QueryBuilder::new().where_eq("x", "y").build();
     assert!(result.is_err());
 }
+
+// ==================== BM25 Search Tests ====================
+
+#[test]
+fn test_execute_search_with_bm25() {
+    use crate::text_index::TextIndex;
+
+    let (store, _dir) = create_test_store();
+    setup_test_data(&store);
+
+    // Get the actual document IDs
+    let docs = store.list_documents().unwrap();
+    let doc_a = docs.iter().find(|d| d.title == "Contract A").unwrap();
+    let doc_b = docs.iter().find(|d| d.title == "Contract B").unwrap();
+    let doc_c = docs.iter().find(|d| d.title == "Contract C").unwrap();
+
+    // Create text index
+    let text_index = TextIndex::in_memory().unwrap();
+
+    // Index document content with correct table_id ("legal")
+    text_index
+        .index_node(
+            &doc_a.id,
+            "node_a",
+            "legal", // Must match the actual table_id
+            "Contract A",
+            "This agreement covers payment terms of fifty thousand dollars.",
+            Some("alice"),
+            &["nda".to_string()],
+        )
+        .unwrap();
+    text_index
+        .index_node(
+            &doc_b.id,
+            "node_b",
+            "legal",
+            "Contract B",
+            "Service agreement with monthly maintenance fee.",
+            Some("bob"),
+            &["service".to_string()],
+        )
+        .unwrap();
+    text_index
+        .index_node(
+            &doc_c.id,
+            "node_c",
+            "legal",
+            "Contract C",
+            "Employment contract with salary and payment schedule.",
+            Some("alice"),
+            &["employment".to_string()],
+        )
+        .unwrap();
+    text_index.commit().unwrap();
+
+    // Search for "payment"
+    let query = Query::parse("SELECT * FROM legal SEARCH 'payment'").unwrap();
+    let result = store
+        .execute_rql_with_search(&query, Some(&text_index))
+        .unwrap();
+
+    // Should find documents with "payment" - Contract A and Contract C
+    assert!(result.stats.search_executed);
+    assert_eq!(result.stats.index_used, Some("bm25_full_text".to_string()));
+    assert!(result.documents.len() >= 1, "Expected at least 1 match, got {}", result.documents.len());
+
+    // Results should have scores
+    assert!(result.documents[0].score.is_some());
+}
+
+#[test]
+fn test_execute_search_no_index() {
+    let (store, _dir) = create_test_store();
+    setup_test_data(&store);
+
+    // Search without text index - should fall back to filter
+    let query = Query::parse("SELECT * FROM legal SEARCH 'payment'").unwrap();
+    let result = store.execute_rql_with_search(&query, None).unwrap();
+
+    // Should return all documents (no search filtering without index)
+    assert!(!result.stats.search_executed);
+    assert_eq!(result.total_count, 3);
+}
