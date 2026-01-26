@@ -49,19 +49,27 @@ impl LLMProvider {
         }
     }
 
-    /// Create an Anthropic provider with Claude 3.5 Sonnet
+    /// Create an Anthropic provider with Claude 4.5 Sonnet (powerful reasoning)
     pub fn claude_sonnet(api_key: impl Into<String>) -> Self {
         Self::Anthropic {
             api_key: api_key.into(),
-            model: "claude-3-5-sonnet-20241022".to_string(),
+            model: "claude-sonnet-4-5-20250929".to_string(),
         }
     }
 
-    /// Create an Anthropic provider with Claude 3 Haiku (fast)
+    /// Create an Anthropic provider with Claude 4.5 Haiku (fast, cost-effective)
     pub fn claude_haiku(api_key: impl Into<String>) -> Self {
         Self::Anthropic {
             api_key: api_key.into(),
-            model: "claude-3-haiku-20240307".to_string(),
+            model: "claude-haiku-4-5-20250929".to_string(),
+        }
+    }
+
+    /// Create an Anthropic provider with a custom model name
+    pub fn anthropic_custom(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+        Self::Anthropic {
+            api_key: api_key.into(),
+            model: model.into(),
         }
     }
 
@@ -162,11 +170,43 @@ impl Reasoner {
                 })
             }
             LLMProvider::Anthropic { api_key, model } => {
+                // Anthropic requires max_tokens, and extractor doesn't support it
+                // Use agent with JSON output and parse manually
                 let client = rig::providers::anthropic::ClientBuilder::new(api_key).build();
-                let extractor = client.extractor::<T>(model).build();
+                let agent = client
+                    .agent(model)
+                    .max_tokens(4096)
+                    .preamble("You are a JSON extraction assistant. Always respond with valid JSON only, no other text.")
+                    .build();
 
-                extractor.extract(prompt).await.map_err(|e| {
-                    ReasonError::Reasoning(format!("Anthropic extraction error: {}", e))
+                // Generate JSON schema for the expected type
+                let schema = schemars::schema_for!(T);
+                let schema_json = serde_json::to_string_pretty(&schema)
+                    .map_err(|e| ReasonError::Reasoning(format!("Schema error: {}", e)))?;
+
+                let extraction_prompt = format!(
+                    "Extract the following information from the text and return ONLY valid JSON matching this schema:\n\nSchema:\n{}\n\nText to extract from:\n{}",
+                    schema_json, prompt
+                );
+
+                let response = agent.prompt(&extraction_prompt).await.map_err(|e| {
+                    ReasonError::Reasoning(format!("Anthropic completion error: {}", e))
+                })?;
+
+                // Strip markdown code blocks if present
+                let json_str = response
+                    .trim()
+                    .strip_prefix("```json")
+                    .or_else(|| response.trim().strip_prefix("```"))
+                    .unwrap_or(&response)
+                    .trim()
+                    .strip_suffix("```")
+                    .unwrap_or(&response)
+                    .trim();
+
+                // Parse the JSON response
+                serde_json::from_str(json_str).map_err(|e| {
+                    ReasonError::Reasoning(format!("Failed to parse Anthropic JSON response: {}. Response was: {}", e, json_str))
                 })
             }
             LLMProvider::Gemini { api_key, model } => {
@@ -201,7 +241,10 @@ impl Reasoner {
             }
             LLMProvider::Anthropic { api_key, model } => {
                 let client = rig::providers::anthropic::ClientBuilder::new(api_key).build();
-                let agent = client.agent(model).build();
+                let agent = client
+                    .agent(model)
+                    .max_tokens(4096)
+                    .build();
 
                 agent.prompt(prompt).await.map_err(|e| {
                     ReasonError::Reasoning(format!("Anthropic completion error: {}", e))

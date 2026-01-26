@@ -359,7 +359,10 @@ impl SemanticChunker {
         }
 
         // Don't forget the last chunk
-        if !current.trim().is_empty() && current.chars().count() >= self.config.min_chunk_size {
+        // Always include if we have no chunks yet (small documents), or if it meets min size
+        if !current.trim().is_empty()
+            && (chunks.is_empty() || current.chars().count() >= self.config.min_chunk_size)
+        {
             let char_count = current.chars().count();
             chunks.push(TextChunk {
                 id: String::new(),

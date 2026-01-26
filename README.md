@@ -9,84 +9,126 @@ ReasonDB is a reasoning-native database optimized for AI agent workflows. Unlike
 - **Hierarchical Document Storage**: Documents stored as navigable trees, not flat chunks
 - **LLM-Guided Retrieval**: AI reasons through the tree structure, not just similarity search
 - **Parallel Branch Exploration**: Concurrent traversal using Rust's async runtime
-- **Multi-Format Support**: PDFs, JSON, Markdown, HTML, source code, and more
+- **Multi-Format Support**: PDFs, Markdown, HTML, and more (via MarkItDown)
+- **Multi-Provider LLM Support**: OpenAI, Anthropic Claude, Google Gemini, Cohere
+- **REST API**: Full HTTP API with Swagger UI documentation
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Rust 1.70+
+- An LLM API key (OpenAI or Anthropic)
+
+### Build & Run
+
+```bash
+# Build
+cargo build --release
+
+# Run server with Anthropic
+ANTHROPIC_API_KEY=your-key cargo run -p reasondb-server
+
+# Or with OpenAI
+OPENAI_API_KEY=your-key cargo run -p reasondb-server
+```
+
+Server starts at **http://localhost:4444** with Swagger UI at **http://localhost:4444/swagger-ui/**
+
+### API Examples
+
+#### Ingest a Document
+
+```bash
+curl -X POST http://localhost:4444/v1/ingest/text \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "AI Fundamentals",
+    "content": "# AI Fundamentals\n\nArtificial Intelligence is the simulation of human intelligence..."
+  }'
+```
+
+Response:
+```json
+{
+  "document_id": "902dae45-4601-4b5d-ae69-71c819713b87",
+  "title": "AI Fundamentals",
+  "total_nodes": 2,
+  "max_depth": 1,
+  "stats": {
+    "summaries_generated": 2,
+    "total_time_ms": 6085
+  }
+}
+```
+
+#### Search with LLM Reasoning
+
+```bash
+curl -X POST http://localhost:4444/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is machine learning?"}'
+```
+
+Response:
+```json
+{
+  "results": [{
+    "content": "Machine learning is a subset of AI...",
+    "answer": "Machine learning is a subset of AI where systems learn from data without explicit programming.",
+    "confidence": 0.95
+  }],
+  "stats": {
+    "nodes_visited": 2,
+    "llm_calls": 2,
+    "total_time_ms": 5141
+  }
+}
+```
+
+#### List Documents
+
+```bash
+curl http://localhost:4444/v1/documents
+```
+
+#### Get Document Tree
+
+```bash
+curl http://localhost:4444/v1/documents/{id}/tree
+```
 
 ## 📦 Project Structure
 
 ```
 reasondb/
 ├── crates/
-│   ├── reasondb-core/      # Core library (models, storage, engine)
-│   ├── reasondb-ingest/    # Document ingestion pipeline
-│   └── reasondb-server/    # HTTP API server
+│   ├── reasondb-core/      # Core library (models, storage, LLM engine)
+│   ├── reasondb-ingest/    # Document ingestion pipeline  
+│   └── reasondb-server/    # HTTP API server (axum)
 ├── PLAN.md                 # Detailed architecture & implementation plan
 └── USE_CASES.md            # Use cases & competitive analysis
-```
-
-## 🚀 Quick Start
-
-### Build
-
-```bash
-cargo build --release
-```
-
-### Run Tests
-
-```bash
-cargo test
-```
-
-### Basic Usage
-
-```rust
-use reasondb_core::{NodeStore, PageNode, Document};
-
-fn main() -> anyhow::Result<()> {
-    // Open database
-    let store = NodeStore::open("./my_database")?;
-
-    // Create a document
-    let doc = Document::new("Annual Report 2024".to_string());
-    store.insert_document(&doc)?;
-
-    // Create a hierarchical tree
-    let mut root = PageNode::new_root(doc.id.clone(), "Report".to_string());
-    let mut chapter1 = PageNode::new(
-        doc.id.clone(),
-        "Chapter 1: Financials".to_string(),
-        Some("This chapter covers Q1-Q4 financial results...".to_string()),
-        1,
-    );
-    
-    // Build the tree
-    chapter1.set_parent(root.id.clone());
-    root.add_child(chapter1.id.clone());
-
-    // Store nodes
-    store.insert_node(&root)?;
-    store.insert_node(&chapter1)?;
-
-    // Retrieve and traverse
-    let children = store.get_children(&root)?;
-    println!("Root has {} children", children.len());
-
-    Ok(())
-}
 ```
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                  ReasonDB                        │
-├─────────────────────────────────────────────────┤
-│  Ingestion Pipeline    │    Query Engine         │
-│  (PDF → Tree)          │    (LLM Traversal)      │
-├─────────────────────────────────────────────────┤
-│              Storage Engine (redb)               │
-│          Nodes Table │ Documents Table           │
-└─────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                       ReasonDB                          │
+├─────────────────────────────────────────────────────────┤
+│   HTTP API (axum)                                       │
+│   /ingest  │  /search  │  /documents                    │
+├─────────────────────────────────────────────────────────┤
+│   Ingestion Pipeline    │    Search Engine              │
+│   (Extract → Chunk →    │    (LLM Beam Search           │
+│    Summarize → Store)   │     Tree Traversal)           │
+├─────────────────────────────────────────────────────────┤
+│   LLM Provider Layer                                    │
+│   (OpenAI │ Anthropic │ Gemini │ Cohere)               │
+├─────────────────────────────────────────────────────────┤
+│   Storage Engine (redb)                                 │
+│   Nodes Table  │  Documents Table                       │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ### How It Works
@@ -94,7 +136,7 @@ fn main() -> anyhow::Result<()> {
 1. **Ingest**: Documents are parsed and converted into hierarchical trees
 2. **Summarize**: LLM generates summaries for each node (bottom-up)
 3. **Search**: LLM traverses tree, choosing branches based on summaries
-4. **Return**: Only relevant leaf nodes returned with full path context
+4. **Return**: Relevant content with extracted answers and confidence scores
 
 ## 📊 Why ReasonDB?
 
@@ -110,20 +152,34 @@ fn main() -> anyhow::Result<()> {
 - **Storage**: `redb` - Pure Rust, ACID-compliant embedded database
 - **Serialization**: `bincode` + `serde` - Fast binary encoding
 - **Async Runtime**: `tokio` - Parallel branch exploration
-- **HTTP Server**: `axum` (coming soon)
+- **HTTP Server**: `axum` - Fast, ergonomic web framework
+- **LLM Integration**: `rig-core` - Multi-provider LLM abstraction
+- **API Docs**: `utoipa` - OpenAPI 3.0 + Swagger UI
 
 ## 📅 Roadmap
 
 - [x] **Phase 1**: Core storage (models, redb, CRUD) ✅
-- [ ] **Phase 2**: Reasoning engine (LLM trait, beam search)
-- [ ] **Phase 3**: Ingestion pipeline (PDF parsing, chunking)
-- [ ] **Phase 4**: HTTP API (axum server)
-- [ ] **Phase 5**: Optimizations (caching, hybrid retrieval)
+- [x] **Phase 2**: Reasoning engine (LLM trait, beam search) ✅
+- [x] **Phase 3**: Ingestion pipeline (chunking, summarization) ✅
+- [x] **Phase 4**: HTTP API (axum server, OpenAPI docs) ✅
+- [ ] **Phase 5**: Optimizations (caching, hybrid retrieval, embeddings)
+- [ ] **Phase 6**: Production features (auth, rate limiting, clustering)
+
+## 🔧 Configuration
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `ANTHROPIC_API_KEY` | Anthropic API key | - |
+| `OPENAI_API_KEY` | OpenAI API key | - |
+| `REASONDB_PORT` | Server port | 4444 |
+| `REASONDB_HOST` | Server host | 127.0.0.1 |
+| `REASONDB_PATH` | Database file path | reasondb.redb |
 
 ## 📄 Documentation
 
 - [PLAN.md](./PLAN.md) - Detailed architecture and implementation plan
 - [USE_CASES.md](./USE_CASES.md) - Real-world use cases and competitive analysis
+- [Swagger UI](http://localhost:4444/swagger-ui/) - Interactive API documentation (when server is running)
 
 ## 📜 License
 

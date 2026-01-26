@@ -106,6 +106,7 @@ pub struct NodeSummary {
 
 /// Tree node with nested children
 #[derive(Debug, Serialize, ToSchema)]
+#[schema(no_recursion)]
 pub struct TreeNode {
     /// Unique node ID
     #[schema(example = "node_xyz789")]

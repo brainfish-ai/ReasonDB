@@ -21,7 +21,7 @@ use crate::routes::{documents, ingest, search};
         )
     ),
     servers(
-        (url = "http://localhost:3000", description = "Local development server")
+        (url = "http://localhost:4444", description = "Local development server")
     ),
     tags(
         (name = "ingestion", description = "Document ingestion endpoints"),

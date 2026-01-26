@@ -22,7 +22,7 @@ struct Args {
     host: String,
 
     /// Port to bind to
-    #[arg(short, long, default_value = "3000", env = "REASONDB_PORT")]
+    #[arg(short, long, default_value = "4444", env = "REASONDB_PORT")]
     port: u16,
 
     /// Database file path
@@ -36,6 +36,10 @@ struct Args {
     /// Anthropic API key (alternative to OpenAI)
     #[arg(long, env = "ANTHROPIC_API_KEY")]
     anthropic_key: Option<String>,
+
+    /// Custom model name (overrides default)
+    #[arg(long, env = "REASONDB_MODEL")]
+    model: Option<String>,
 
     /// Disable summary generation during ingestion
     #[arg(long)]
@@ -90,8 +94,14 @@ async fn main() -> anyhow::Result<()> {
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         axum::serve(listener, app).await?;
     } else if let Some(api_key) = args.anthropic_key {
-        info!("Using Anthropic provider (Claude Sonnet)");
-        let reasoner = Reasoner::new(LLMProvider::claude_sonnet(&api_key));
+        let provider = if let Some(model) = &args.model {
+            info!("Using Anthropic provider (custom model: {})", model);
+            LLMProvider::anthropic_custom(&api_key, model)
+        } else {
+            info!("Using Anthropic provider (Claude Sonnet)");
+            LLMProvider::claude_sonnet(&api_key)
+        };
+        let reasoner = Reasoner::new(provider);
         let state = Arc::new(AppState::new(store, reasoner, config));
         let app = create_server(state);
 
