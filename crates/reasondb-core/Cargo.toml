@@ -31,6 +31,10 @@ tracing.workspace = true
 # HTTP client
 reqwest.workspace = true
 
+# LLM Framework
+rig-core.workspace = true
+schemars.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util", "macros"] }

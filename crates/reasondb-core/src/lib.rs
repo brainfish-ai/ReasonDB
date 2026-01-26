@@ -36,6 +36,6 @@ pub mod store;
 // Re-export main types
 pub use engine::{SearchConfig, SearchEngine, SearchResult};
 pub use error::{ReasonError, Result};
-pub use llm::{MockReasoner, OpenAIReasoner, ReasoningEngine};
+pub use llm::{LLMProvider, MockReasoner, ReasoningEngine, RigReasoner};
 pub use model::{Document, NodeId, NodeMetadata, PageNode};
 pub use store::NodeStore;

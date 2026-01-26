@@ -1,24 +1,30 @@
 //! LLM Interface for ReasonDB
 //!
 //! This module defines the `ReasoningEngine` trait that abstracts LLM interactions.
-//! Different providers (OpenAI, Anthropic, local models) can implement this trait.
+//! Supports multiple providers via the `rig` framework: OpenAI, Anthropic, Gemini, etc.
 
 pub mod mock;
-pub mod openai;
+pub mod rig_provider;
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::model::PageNode;
 
 /// A summary of a node for LLM decision making
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NodeSummary {
+    /// Unique identifier for the node
     pub id: String,
+    /// Human-readable title
     pub title: String,
+    /// Brief summary of the node's content
     pub summary: String,
+    /// Depth level in the tree
     pub depth: u8,
+    /// Whether this is a leaf node
     pub is_leaf: bool,
 }
 
@@ -34,8 +40,9 @@ impl From<&PageNode> for NodeSummary {
     }
 }
 
-/// Decision made by the LLM about which branches to explore
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Decision made by the LLM about which branches to explore.
+/// Uses JsonSchema for structured output extraction.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TraversalDecision {
     /// ID of the node to explore
     pub node_id: String,
@@ -45,8 +52,16 @@ pub struct TraversalDecision {
     pub reasoning: String,
 }
 
-/// Result of verifying if a leaf node answers the query
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Wrapper for multiple traversal decisions
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TraversalDecisions {
+    /// List of selected nodes to explore
+    pub selections: Vec<TraversalDecision>,
+}
+
+/// Result of verifying if a leaf node answers the query.
+/// Uses JsonSchema for structured output extraction.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct VerificationResult {
     /// Whether the content is relevant to the query
     pub is_relevant: bool,
@@ -209,4 +224,4 @@ mod tests {
 
 // Re-export for convenience
 pub use mock::MockReasoner;
-pub use openai::OpenAIReasoner;
+pub use rig_provider::{LLMProvider, RigReasoner};
