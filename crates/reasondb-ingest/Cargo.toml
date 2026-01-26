@@ -1,0 +1,25 @@
+[package]
+name = "reasondb-ingest"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Document ingestion pipeline for ReasonDB"
+
+[dependencies]
+reasondb-core = { path = "../reasondb-core" }
+
+# Async
+tokio.workspace = true
+async-trait.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling
+thiserror.workspace = true
+anyhow.workspace = true
+
+# Utilities
+tracing.workspace = true

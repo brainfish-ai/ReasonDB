@@ -1,0 +1,25 @@
+[package]
+name = "reasondb-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "HTTP API server for ReasonDB"
+
+[dependencies]
+reasondb-core = { path = "../reasondb-core" }
+reasondb-ingest = { path = "../reasondb-ingest" }
+
+# Async
+tokio.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling
+thiserror.workspace = true
+anyhow.workspace = true
+
+# Utilities
+tracing.workspace = true
