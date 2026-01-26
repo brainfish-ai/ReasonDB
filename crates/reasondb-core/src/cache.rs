@@ -193,6 +193,135 @@ impl Default for SummaryCache {
     }
 }
 
+/// Cached query result for REASON queries
+#[derive(Debug, Clone)]
+pub struct CachedQueryResult {
+    /// The query string (normalized)
+    pub query: String,
+    /// Table ID
+    pub table_id: String,
+    /// Cached document matches
+    pub matches: Vec<CachedMatch>,
+    /// When the result was cached
+    pub cached_at: Instant,
+    /// Number of LLM calls saved
+    pub llm_calls_saved: usize,
+}
+
+/// A cached match result
+#[derive(Debug, Clone)]
+pub struct CachedMatch {
+    pub document_id: String,
+    pub document_title: String,
+    pub score: f32,
+    pub answer: Option<String>,
+    pub confidence: f32,
+    pub highlights: Vec<String>,
+}
+
+/// Query result cache - saves expensive LLM calls
+pub struct QueryCache {
+    cache: Cache<CachedQueryResult>,
+    hits: std::sync::atomic::AtomicU64,
+    misses: std::sync::atomic::AtomicU64,
+}
+
+impl QueryCache {
+    /// Create a new query cache
+    /// Default: 1000 queries, 30 minute TTL
+    pub fn new() -> Self {
+        Self {
+            cache: Cache::new(1_000, 1800), // 30 min TTL
+            hits: std::sync::atomic::AtomicU64::new(0),
+            misses: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// Create with custom settings
+    pub fn with_capacity(max_queries: usize, ttl_secs: u64) -> Self {
+        Self {
+            cache: Cache::new(max_queries, ttl_secs),
+            hits: std::sync::atomic::AtomicU64::new(0),
+            misses: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// Generate cache key from query and table
+    fn cache_key(query: &str, table_id: &str) -> String {
+        // Normalize query: lowercase, trim, collapse whitespace
+        let normalized = query.to_lowercase()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!("{}:{}", table_id, normalized)
+    }
+
+    /// Try to get a cached result
+    pub fn get(&self, query: &str, table_id: &str) -> Option<CachedQueryResult> {
+        let key = Self::cache_key(query, table_id);
+        match self.cache.get(&key) {
+            Some(result) => {
+                self.hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                Some(result)
+            }
+            None => {
+                self.misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                None
+            }
+        }
+    }
+
+    /// Cache a query result
+    pub fn insert(&self, query: &str, table_id: &str, result: CachedQueryResult) {
+        let key = Self::cache_key(query, table_id);
+        self.cache.insert(key, result);
+    }
+
+    /// Invalidate cache entries for a table (call when documents change)
+    pub fn invalidate_table(&self, _table_id: &str) {
+        // For simplicity, clear entire cache
+        // A more sophisticated implementation would track table -> keys mapping
+        self.cache.clear();
+    }
+
+    /// Get cache statistics
+    pub fn stats(&self) -> QueryCacheStats {
+        let hits = self.hits.load(std::sync::atomic::Ordering::Relaxed);
+        let misses = self.misses.load(std::sync::atomic::Ordering::Relaxed);
+        let total = hits + misses;
+        QueryCacheStats {
+            hits,
+            misses,
+            hit_rate: if total > 0 { hits as f64 / total as f64 } else { 0.0 },
+            size: self.cache.stats().size,
+            max_size: self.cache.stats().max_size,
+        }
+    }
+
+    /// Clear the cache
+    pub fn clear(&self) {
+        self.cache.clear();
+        self.hits.store(0, std::sync::atomic::Ordering::Relaxed);
+        self.misses.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+impl Default for QueryCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Query cache statistics
+#[derive(Debug, Clone)]
+pub struct QueryCacheStats {
+    pub hits: u64,
+    pub misses: u64,
+    pub hit_rate: f64,
+    pub size: usize,
+    pub max_size: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,5 +391,62 @@ mod tests {
         
         assert_eq!(found.len(), 2);
         assert_eq!(missing, vec!["doc3".to_string()]);
+    }
+
+    #[test]
+    fn test_query_cache() {
+        let cache = QueryCache::new();
+        
+        // Miss on first query
+        assert!(cache.get("What are penalties?", "legal").is_none());
+        
+        // Insert result
+        let result = CachedQueryResult {
+            query: "What are penalties?".to_string(),
+            table_id: "legal".to_string(),
+            matches: vec![CachedMatch {
+                document_id: "doc1".to_string(),
+                document_title: "Contract".to_string(),
+                score: 0.95,
+                answer: Some("5% late fee".to_string()),
+                confidence: 0.95,
+                highlights: vec!["late fee of 5%".to_string()],
+            }],
+            cached_at: Instant::now(),
+            llm_calls_saved: 5,
+        };
+        cache.insert("What are penalties?", "legal", result);
+        
+        // Hit on second query
+        let cached = cache.get("What are penalties?", "legal").unwrap();
+        assert_eq!(cached.matches.len(), 1);
+        assert_eq!(cached.matches[0].answer, Some("5% late fee".to_string()));
+        
+        // Check stats
+        let stats = cache.stats();
+        assert_eq!(stats.hits, 1);
+        assert_eq!(stats.misses, 1);
+        assert_eq!(stats.hit_rate, 0.5);
+    }
+
+    #[test]
+    fn test_query_cache_normalization() {
+        let cache = QueryCache::new();
+        
+        let result = CachedQueryResult {
+            query: "test".to_string(),
+            table_id: "t1".to_string(),
+            matches: vec![],
+            cached_at: Instant::now(),
+            llm_calls_saved: 1,
+        };
+        
+        // Insert with extra whitespace and caps
+        cache.insert("  What  ARE   penalties?  ", "legal", result);
+        
+        // Should hit with normalized query
+        assert!(cache.get("what are penalties?", "legal").is_some());
+        assert!(cache.get("WHAT ARE PENALTIES?", "legal").is_some());
+        assert!(cache.get("what   are   penalties?", "legal").is_some());
     }
 }

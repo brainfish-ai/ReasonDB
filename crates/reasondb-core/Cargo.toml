@@ -21,6 +21,7 @@ tantivy.workspace = true
 # Async
 tokio.workspace = true
 async-trait.workspace = true
+futures.workspace = true
 
 # Error handling
 thiserror.workspace = true

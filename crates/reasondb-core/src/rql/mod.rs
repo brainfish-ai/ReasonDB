@@ -38,7 +38,7 @@ mod tests;
 // Re-export public types
 pub use ast::*;
 pub use error::{RqlError, RqlResult};
-pub use executor::{QueryResult, DocumentMatch};
+pub use executor::{DocumentMatch, QueryResult, QueryStats};
 
 use crate::model::SearchFilter;
 

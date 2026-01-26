@@ -3,6 +3,7 @@
 //! Shared state accessible to all request handlers.
 
 use reasondb_core::{
+    cache::QueryCache,
     llm::{mock::MockReasoner, provider::Reasoner, ReasoningEngine},
     store::NodeStore,
     text_index::TextIndex,
@@ -17,6 +18,8 @@ pub struct AppState<R: ReasoningEngine = Reasoner> {
     pub text_index: Arc<TextIndex>,
     /// LLM reasoning engine
     pub reasoner: Arc<R>,
+    /// Query result cache (saves LLM calls)
+    pub query_cache: Arc<QueryCache>,
     /// Server configuration
     pub config: ServerConfig,
 }
@@ -28,6 +31,7 @@ impl<R: ReasoningEngine> AppState<R> {
             store: Arc::new(store),
             text_index: Arc::new(text_index),
             reasoner: Arc::new(reasoner),
+            query_cache: Arc::new(QueryCache::new()),
             config,
         }
     }

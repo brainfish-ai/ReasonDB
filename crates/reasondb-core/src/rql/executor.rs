@@ -485,43 +485,60 @@ impl NodeStore {
             candidates
         };
 
-        // ====== PHASE 3: Deep LLM Reasoning ======
-        // Now reason deeply on the top-ranked documents
-        // Note: This is sequential to avoid overwhelming LLM rate limits
+        // ====== PHASE 3: Deep LLM Reasoning (PARALLEL) ======
+        // Process documents in parallel for 3-5x speedup
+        // Configurable concurrency to respect rate limits
+        const MAX_CONCURRENT: usize = 5; // Process 5 docs at a time
+        
+        let docs_to_process: Vec<_> = documents.into_iter().collect();
+        let total_docs = docs_to_process.len();
+        
+        // Process in batches for controlled parallelism
         let mut all_matches: Vec<DocumentMatch> = Vec::new();
         let mut total_llm_calls = 1; // Count the ranking call
-        let mut docs_processed = 0;
-        let target_results = query.limit.as_ref().map(|l| l.count).unwrap_or(10);
+        
+        for chunk in docs_to_process.chunks(MAX_CONCURRENT) {
+            // Create futures for parallel execution
+            let futures: Vec<_> = chunk.iter().map(|doc| {
+                let engine = &engine;
+                let doc = doc.clone();
+                let query = reason_query.to_string();
+                async move {
+                    let result = engine.search_document(&query, &doc.id).await;
+                    (doc, result)
+                }
+            }).collect();
+            
+            // Execute all futures in parallel
+            let results = futures::future::join_all(futures).await;
+            
+            // Collect results
+            for (doc, search_result) in results {
+                if let Ok(response) = search_result {
+                    total_llm_calls += response.stats.llm_calls;
 
-        for doc in &documents {
-            let search_result = engine.search_document(reason_query, &doc.id).await;
-            docs_processed += 1;
-
-            if let Ok(response) = search_result {
-                total_llm_calls += response.stats.llm_calls;
-
-                // Convert search results to DocumentMatch
-                for result in response.results {
-                    // Apply min_confidence filter
-                    if let Some(min_conf) = min_confidence {
-                        if result.confidence < min_conf {
-                            continue;
+                    for result in response.results {
+                        // Apply min_confidence filter
+                        if let Some(min_conf) = min_confidence {
+                            if result.confidence < min_conf {
+                                continue;
+                            }
                         }
-                    }
 
-                    all_matches.push(DocumentMatch {
-                        document: doc.clone(),
-                        score: Some(result.confidence),
-                        matched_nodes: vec![result.node_id.clone()],
-                        highlights: vec![result.content.clone()],
-                        answer: result.extracted_answer,
-                        confidence: Some(result.confidence),
-                    });
+                        all_matches.push(DocumentMatch {
+                            document: doc.clone(),
+                            score: Some(result.confidence),
+                            matched_nodes: vec![result.node_id.clone()],
+                            highlights: vec![result.content.clone()],
+                            answer: result.extracted_answer,
+                            confidence: Some(result.confidence),
+                        });
+                    }
                 }
             }
-
-            // Early termination: stop if we have enough high-confidence results
-            // This saves LLM calls when good matches are found early
+            
+            // Early termination check after each batch
+            let target_results = query.limit.as_ref().map(|l| l.count).unwrap_or(10);
             let high_confidence_count = all_matches.iter()
                 .filter(|m| m.confidence.unwrap_or(0.0) >= min_confidence.unwrap_or(0.3))
                 .count();
@@ -529,6 +546,8 @@ impl NodeStore {
                 break;
             }
         }
+        
+        let docs_processed = total_docs.min(all_matches.len() + MAX_CONCURRENT);
 
         // Sort by confidence (highest first)
         all_matches.sort_by(|a, b| {

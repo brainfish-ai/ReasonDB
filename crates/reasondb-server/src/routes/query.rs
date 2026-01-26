@@ -4,7 +4,7 @@
 
 use axum::{extract::State, Json};
 use reasondb_core::llm::ReasoningEngine;
-use reasondb_core::rql::{Query, QueryResult, DocumentMatch};
+use reasondb_core::rql::{DocumentMatch, Query, QueryResult, QueryStats};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utoipa::ToSchema;
@@ -135,20 +135,87 @@ pub async fn execute_query<R: ReasoningEngine + Send + Sync + 'static>(
     State(state): State<Arc<AppState<R>>>,
     Json(request): Json<QueryRequest>,
 ) -> Result<Json<QueryResponse>, ApiError> {
+    use reasondb_core::cache::{CachedMatch, CachedQueryResult};
+    use std::time::Instant;
+
     // Parse the query
     let query = Query::parse(&request.query)
         .map_err(|e| ApiError::BadRequest(format!("Invalid query: {}", e)))?;
 
     // Check if this is a REASON query (needs async LLM execution)
-    let result = if query.reason.is_some() {
-        // Use async executor for REASON queries (supports hybrid SEARCH + REASON)
-        state
-            .store
-            .execute_rql_async(&query, Some(state.text_index.as_ref()), state.reasoner.clone())
-            .await
-            .map_err(|e| ApiError::Internal(format!("Query execution failed: {}", e)))?
+    let result = if let Some(ref reason_clause) = query.reason {
+        // Check cache first for REASON queries
+        if let Some(cached) = state.query_cache.get(&reason_clause.query, &query.from.table) {
+            tracing::info!(
+                "Cache HIT for query '{}' - saved {} LLM calls",
+                reason_clause.query,
+                cached.llm_calls_saved
+            );
+            
+            // Convert cached result to QueryResult
+            let matches: Vec<DocumentMatch> = cached.matches.iter().map(|m| {
+                DocumentMatch {
+                    document: reasondb_core::Document::new(m.document_title.clone(), &cached.table_id),
+                    score: Some(m.score),
+                    matched_nodes: vec![],
+                    highlights: m.highlights.clone(),
+                    answer: m.answer.clone(),
+                    confidence: Some(m.confidence),
+                }
+            }).collect();
+            
+            QueryResult {
+                documents: matches,
+                total_count: cached.matches.len(),
+                execution_time_ms: 0, // Cached
+                stats: QueryStats {
+                    index_used: Some("cache".to_string()),
+                    rows_scanned: 0,
+                    rows_returned: cached.matches.len(),
+                    search_executed: false,
+                    reason_executed: false, // Already done
+                    llm_calls: 0, // Cached
+                },
+            }
+        } else {
+            // Cache miss - execute query
+            let result = state
+                .store
+                .execute_rql_async(&query, Some(state.text_index.as_ref()), state.reasoner.clone())
+                .await
+                .map_err(|e| ApiError::Internal(format!("Query execution failed: {}", e)))?;
+            
+            // Cache the result
+            let cached_matches: Vec<CachedMatch> = result.documents.iter().map(|m| {
+                CachedMatch {
+                    document_id: m.document.id.clone(),
+                    document_title: m.document.title.clone(),
+                    score: m.score.unwrap_or(0.0),
+                    answer: m.answer.clone(),
+                    confidence: m.confidence.unwrap_or(0.0),
+                    highlights: m.highlights.clone(),
+                }
+            }).collect();
+            
+            let cache_entry = CachedQueryResult {
+                query: reason_clause.query.clone(),
+                table_id: query.from.table.clone(),
+                matches: cached_matches,
+                cached_at: Instant::now(),
+                llm_calls_saved: result.stats.llm_calls,
+            };
+            
+            state.query_cache.insert(&reason_clause.query, &query.from.table, cache_entry);
+            tracing::info!(
+                "Cache MISS for query '{}' - cached {} results",
+                reason_clause.query,
+                result.documents.len()
+            );
+            
+            result
+        }
     } else {
-        // Use sync executor for SEARCH/WHERE queries
+        // Use sync executor for SEARCH/WHERE queries (no caching needed - fast enough)
         state
             .store
             .execute_rql_with_search(&query, Some(state.text_index.as_ref()))

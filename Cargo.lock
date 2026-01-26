@@ -1810,6 +1810,7 @@ dependencies = [
  "async-trait",
  "bincode",
  "chrono",
+ "futures",
  "redb",
  "regex",
  "reqwest 0.12.28",
