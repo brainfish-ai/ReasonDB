@@ -3,37 +3,33 @@ import { Panel, Group, Separator } from 'react-resizable-panels'
 import {
   Plus,
   X,
-  Play,
-  FloppyDisk,
   Table as TableIcon,
   Code,
   TreeStructure,
 } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
 import { WelcomeScreen } from '@/components/common/WelcomeScreen'
+import { QueryEditor } from '@/components/query/QueryEditor'
+import { QueryResults } from '@/components/query/QueryResults'
+import { useQueryStore } from '@/stores/queryStore'
 
 interface Tab {
   id: string
   title: string
   type: 'query' | 'table'
-  content?: string
 }
 
 export function MainPanel() {
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
-  const [resultView, setResultView] = useState<'table' | 'json' | 'tree'>(
-    'table'
-  )
-
-  const activeTab = tabs.find((t) => t.id === activeTabId)
+  const [resultView, setResultView] = useState<'table' | 'json' | 'tree'>('table')
+  const { result } = useQueryStore()
 
   const addNewTab = () => {
     const newTab: Tab = {
       id: crypto.randomUUID(),
       title: `Query ${tabs.length + 1}`,
       type: 'query',
-      content: '',
     }
     setTabs([...tabs, newTab])
     setActiveTabId(newTab.id)
@@ -58,11 +54,11 @@ export function MainPanel() {
       <div className="flex items-center bg-mantle border-b border-border">
         <div className="flex-1 flex items-center overflow-x-auto">
           {tabs.map((tab) => (
-            <button
+            <div
               key={tab.id}
               onClick={() => setActiveTabId(tab.id)}
               className={cn(
-                'group flex items-center gap-2 px-4 py-2 text-sm border-r border-border',
+                'group flex items-center gap-2 px-4 py-2 text-sm border-r border-border cursor-pointer',
                 'hover:bg-surface-0 transition-colors min-w-[120px] max-w-[200px]',
                 activeTabId === tab.id
                   ? 'bg-base text-text'
@@ -80,7 +76,7 @@ export function MainPanel() {
               >
                 <X size={12} weight="bold" />
               </button>
-            </button>
+            </div>
           ))}
         </div>
         <button
@@ -92,73 +88,27 @@ export function MainPanel() {
         </button>
       </div>
 
-      {/* Main content */}
+      {/* Main content with resizable panels */}
       <Group orientation="vertical" className="flex-1">
         {/* Editor panel */}
-        <Panel defaultSize={60} minSize={20}>
-          <div className="h-full flex flex-col">
-            {/* Toolbar */}
-            <div className="flex items-center gap-2 px-4 py-2 bg-surface-0/30 border-b border-border">
-              <button
-                className={cn(
-                  'flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium',
-                  'bg-green text-base hover:bg-green/90 transition-colors'
-                )}
-              >
-                <Play size={14} weight="fill" />
-                Run
-              </button>
-              <button
-                className={cn(
-                  'flex items-center gap-2 px-3 py-1.5 rounded-md text-sm',
-                  'bg-surface-0 text-subtext-1 hover:text-text hover:bg-surface-1 transition-colors'
-                )}
-              >
-                <FloppyDisk size={14} weight="bold" />
-                Save
-              </button>
-              <span className="text-xs text-overlay-0 ml-auto">
-                Press <kbd className="px-1 py-0.5 rounded bg-surface-0 font-mono">⌘</kbd>
-                +<kbd className="px-1 py-0.5 rounded bg-surface-0 font-mono">Enter</kbd> to run
-              </span>
-            </div>
-
-            {/* Editor area */}
-            <div className="flex-1 p-4">
-              <textarea
-                value={activeTab?.content || ''}
-                onChange={(e) => {
-                  if (activeTab) {
-                    setTabs(
-                      tabs.map((t) =>
-                        t.id === activeTab.id
-                          ? { ...t, content: e.target.value }
-                          : t
-                      )
-                    )
-                  }
-                }}
-                placeholder="Enter your RQL query here..."
-                className={cn(
-                  'w-full h-full resize-none font-mono text-sm',
-                  'bg-transparent text-text placeholder-overlay-0',
-                  'focus:outline-none'
-                )}
-              />
-            </div>
-          </div>
+        <Panel defaultSize={55} minSize={20}>
+          <QueryEditor />
         </Panel>
 
-        <Separator className="h-1 bg-border hover:bg-primary/50 transition-colors" />
+        <Separator className="h-1 bg-border hover:bg-primary/50 transition-colors cursor-row-resize" />
 
         {/* Results panel */}
-        <Panel defaultSize={40} minSize={15}>
+        <Panel defaultSize={45} minSize={15}>
           <div className="h-full flex flex-col">
-            {/* Results header */}
-            <div className="flex items-center justify-between px-4 py-2 bg-surface-0/30 border-b border-border">
+            {/* Results header with view toggles */}
+            <div className="flex items-center justify-between px-3 py-1.5 bg-surface-0/30 border-b border-border">
               <div className="flex items-center gap-4">
                 <span className="text-sm text-text font-medium">Results</span>
-                <span className="text-xs text-overlay-0">0 rows · 0ms</span>
+                {result && (
+                  <span className="text-xs text-overlay-0">
+                    {result.rowCount} rows · {result.executionTime}ms
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-1">
                 <button
@@ -201,8 +151,24 @@ export function MainPanel() {
             </div>
 
             {/* Results content */}
-            <div className="flex-1 flex items-center justify-center text-overlay-0 text-sm">
-              Run a query to see results
+            <div className="flex-1 min-h-0">
+              {resultView === 'table' && <QueryResults />}
+              {resultView === 'json' && (
+                <div className="h-full overflow-auto p-4 font-mono text-xs">
+                  {result ? (
+                    <pre className="text-text">
+                      {JSON.stringify(result.rows, null, 2)}
+                    </pre>
+                  ) : (
+                    <span className="text-overlay-0">Run a query to see results</span>
+                  )}
+                </div>
+              )}
+              {resultView === 'tree' && (
+                <div className="flex items-center justify-center h-full text-overlay-0 text-sm">
+                  Tree view coming soon...
+                </div>
+              )}
             </div>
           </div>
         </Panel>
