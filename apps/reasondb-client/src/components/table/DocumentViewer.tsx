@@ -67,15 +67,12 @@ export function DocumentViewer({ tableId }: DocumentViewerProps) {
     setDocuments,
     selectDocument,
     setLoadingDocuments,
-    getSelectedTable,
   } = useTableStore()
 
   const [viewMode, setViewMode] = useState<ViewMode>('table')
   const [searchQuery, setSearchQuery] = useState('')
   const [sorting, setSorting] = useState<SortingState>([])
   const [copied, setCopied] = useState(false)
-
-  const selectedTable = getSelectedTable()
 
   // Load documents when table is selected
   useEffect(() => {
@@ -160,70 +157,69 @@ export function DocumentViewer({ tableId }: DocumentViewerProps) {
   return (
     <div className="flex flex-col h-full bg-base">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-mantle">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Table size={18} weight="duotone" className="text-mauve" />
-            <span className="font-medium text-text">{selectedTable?.name}</span>
-          </div>
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-border bg-mantle">
+        {/* Table icon */}
+        <div className="flex items-center gap-2 shrink-0">
+          <Table size={18} weight="duotone" className="text-mauve" />
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Search */}
-          <div className="relative">
-            <MagnifyingGlass
-              size={14}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-overlay-0"
-            />
-            <input
-              type="text"
-              placeholder="Search..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className={cn(
-                'w-48 pl-8 pr-3 py-1.5 text-xs rounded-md',
-                'bg-surface-0 border border-border',
-                'text-text placeholder-overlay-0',
-                'focus:outline-none focus:ring-1 focus:ring-primary'
-              )}
-            />
-          </div>
+        {/* Search - takes remaining space */}
+        <div className="relative flex-1">
+          <MagnifyingGlass
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-overlay-0"
+          />
+          <input
+            type="text"
+            placeholder="Search..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className={cn(
+              'w-full pl-9 pr-4 py-1.5 text-xs rounded-full',
+              'bg-surface-0 border border-border',
+              'text-text placeholder-overlay-0',
+              'focus:border-mauve'
+            )}
+            style={{ outline: 'none', boxShadow: 'none' }}
+          />
+        </div>
 
-          <div className="h-4 w-px bg-border" />
+        <div className="h-5 w-px bg-border shrink-0" />
 
-          {/* View mode toggle */}
-          <div className="flex items-center bg-surface-0 rounded-md p-0.5">
-            <button
-              onClick={() => setViewMode('table')}
-              className={cn(
-                'p-1.5 rounded transition-colors',
-                viewMode === 'table' ? 'bg-surface-1 text-text' : 'text-overlay-0 hover:text-text'
-              )}
-              title="Table view"
-            >
-              <Rows size={14} />
-            </button>
-            <button
-              onClick={() => setViewMode('json')}
-              className={cn(
-                'p-1.5 rounded transition-colors',
-                viewMode === 'json' ? 'bg-surface-1 text-text' : 'text-overlay-0 hover:text-text'
-              )}
-              title="JSON view"
-            >
-              <Code size={14} />
-            </button>
-          </div>
+        {/* View mode toggle */}
+        <div className="flex items-center bg-surface-0 rounded-md p-0.5 shrink-0">
+          <button
+            onClick={() => setViewMode('table')}
+            className={cn(
+              'p-1.5 rounded transition-colors',
+              viewMode === 'table' ? 'bg-surface-1 text-text' : 'text-overlay-0 hover:text-text'
+            )}
+            title="Table view"
+          >
+            <Rows size={16} />
+          </button>
+          <button
+            onClick={() => setViewMode('json')}
+            className={cn(
+              'p-1.5 rounded transition-colors',
+              viewMode === 'json' ? 'bg-surface-1 text-text' : 'text-overlay-0 hover:text-text'
+            )}
+            title="JSON view"
+          >
+            <Code size={16} />
+          </button>
+        </div>
 
-          <div className="h-4 w-px bg-border" />
+        <div className="h-5 w-px bg-border shrink-0" />
 
-          {/* Actions */}
+        {/* Actions */}
+        <div className="flex items-center gap-1 shrink-0">
           <Button size="sm" variant="ghost" onClick={handleRefresh} title="Refresh">
-            <ArrowsClockwise size={14} className={isLoadingDocuments ? 'animate-spin' : ''} />
+            <ArrowsClockwise size={16} className={isLoadingDocuments ? 'animate-spin' : ''} />
           </Button>
           
           <Button size="sm" variant="ghost" title="Export">
-            <DownloadSimple size={14} />
+            <DownloadSimple size={16} />
           </Button>
 
           <Button size="sm" variant="ghost" className="gap-1.5">
