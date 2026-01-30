@@ -82,6 +82,7 @@ struct CreateKeyRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct CreateKeyResponse {
     id: String,
     key: String,
@@ -105,6 +106,7 @@ struct KeyResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ApiKeyInfo {
     id: String,
     name: String,

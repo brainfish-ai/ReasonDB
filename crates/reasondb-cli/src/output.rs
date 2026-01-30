@@ -31,11 +31,13 @@ impl Output {
     }
 
     /// Check if table format is requested
+    #[allow(dead_code)]
     pub fn is_table(&self) -> bool {
         matches!(self.format, OutputFormat::Table)
     }
 
     /// Get the format
+    #[allow(dead_code)]
     pub fn format(&self) -> OutputFormat {
         self.format
     }
