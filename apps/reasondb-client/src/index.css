@@ -1,0 +1,147 @@
+@import "tailwindcss";
+
+/* Catppuccin Mocha (Dark) Theme */
+@theme {
+  /* Base colors */
+  --color-base: #1e1e2e;
+  --color-mantle: #181825;
+  --color-crust: #11111b;
+  --color-surface-0: #313244;
+  --color-surface-1: #45475a;
+  --color-surface-2: #585b70;
+  --color-overlay-0: #6c7086;
+  --color-overlay-1: #7f849c;
+  --color-overlay-2: #9399b2;
+  --color-text: #cdd6f4;
+  --color-subtext-0: #a6adc8;
+  --color-subtext-1: #bac2de;
+
+  /* Accent colors */
+  --color-rosewater: #f5e0dc;
+  --color-flamingo: #f2cdcd;
+  --color-pink: #f5c2e7;
+  --color-mauve: #cba6f7;
+  --color-red: #f38ba8;
+  --color-maroon: #eba0ac;
+  --color-peach: #fab387;
+  --color-yellow: #f9e2af;
+  --color-green: #a6e3a1;
+  --color-teal: #94e2d5;
+  --color-sky: #89dceb;
+  --color-sapphire: #74c7ec;
+  --color-blue: #89b4fa;
+  --color-lavender: #b4befe;
+
+  /* Semantic colors */
+  --color-primary: var(--color-mauve);
+  --color-secondary: var(--color-blue);
+  --color-accent: var(--color-sapphire);
+  --color-muted: var(--color-overlay-0);
+  --color-muted-foreground: var(--color-overlay-1);
+  --color-background: var(--color-base);
+  --color-foreground: var(--color-text);
+  --color-card: var(--color-surface-0);
+  --color-card-foreground: var(--color-text);
+  --color-popover: var(--color-surface-0);
+  --color-popover-foreground: var(--color-text);
+  --color-border: var(--color-surface-1);
+  --color-input: var(--color-surface-1);
+  --color-ring: var(--color-mauve);
+  --color-destructive: var(--color-red);
+  --color-success: var(--color-green);
+  --color-warning: var(--color-yellow);
+  --color-info: var(--color-sky);
+
+  /* Font family */
+  --font-sans: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+  /* Border radius */
+  --radius-sm: 0.25rem;
+  --radius: 0.5rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+/* Light theme overrides */
+[data-theme="light"] {
+  --color-base: #eff1f5;
+  --color-mantle: #e6e9ef;
+  --color-crust: #dce0e8;
+  --color-surface-0: #ccd0da;
+  --color-surface-1: #bcc0cc;
+  --color-surface-2: #acb0be;
+  --color-overlay-0: #9ca0b0;
+  --color-overlay-1: #8c8fa1;
+  --color-overlay-2: #7c7f93;
+  --color-text: #4c4f69;
+  --color-subtext-0: #6c6f85;
+  --color-subtext-1: #5c5f77;
+  --color-mauve: #8839ef;
+  --color-blue: #1e66f5;
+  --color-sapphire: #209fb5;
+  --color-red: #d20f39;
+  --color-green: #40a02b;
+  --color-yellow: #df8e1d;
+  --color-sky: #04a5e5;
+}
+
+/* Base styles */
+html {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-mantle);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-overlay-0);
+}
+
+/* Selection */
+::selection {
+  background: var(--color-mauve);
+  color: var(--color-base);
+}
+
+/* Focus visible */
+:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
