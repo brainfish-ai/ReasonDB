@@ -58,18 +58,18 @@ mod tests {
 
     #[test]
     fn test_validate_key_format() {
-        // Valid live key
-        let result = validate_key_format("rdb_live_abcdefghijklmnopqrstuvwxyz12345");
+        // Valid live key (9 + 35 = 44 chars)
+        let result = validate_key_format("rdb_live_abcdefghijklmnopqrstuvwxyz12345abcd");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), KeyPrefix::Live);
 
-        // Valid test key
-        let result = validate_key_format("rdb_test_abcdefghijklmnopqrstuvwxyz12345");
+        // Valid test key (9 + 35 = 44 chars)
+        let result = validate_key_format("rdb_test_abcdefghijklmnopqrstuvwxyz12345abcd");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), KeyPrefix::Test);
 
         // Invalid prefix
-        let result = validate_key_format("rdb_fake_abcdefghijklmnopqrstuvwxyz12345");
+        let result = validate_key_format("rdb_fake_abcdefghijklmnopqrstuvwxyz12345abcd");
         assert!(result.is_err());
 
         // Wrong length

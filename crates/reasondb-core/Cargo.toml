@@ -45,6 +45,9 @@ reqwest.workspace = true
 rig-core.workspace = true
 schemars.workspace = true
 
+# Clustering
+byteorder.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util", "macros"] }

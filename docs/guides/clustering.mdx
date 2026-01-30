@@ -1,0 +1,481 @@
+---
+title: Clustering & Replication
+description: Deploy ReasonDB in a highly available, distributed cluster
+---
+
+# Clustering & Replication
+
+ReasonDB supports clustering for high availability and horizontal scaling. This guide covers how to set up and manage a ReasonDB cluster.
+
+## Architecture Overview
+
+ReasonDB uses a Raft-based consensus protocol for clustering:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    ReasonDB Cluster                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│   ┌─────────┐     ┌─────────┐     ┌─────────┐              │
+│   │ Node 1  │────▶│ Node 2  │────▶│ Node 3  │              │
+│   │ LEADER  │◀────│FOLLOWER │◀────│FOLLOWER │              │
+│   └─────────┘     └─────────┘     └─────────┘              │
+│        │                │               │                   │
+│        │  Raft Log Replication          │                   │
+│        ▼                ▼               ▼                   │
+│   ┌─────────┐     ┌─────────┐     ┌─────────┐              │
+│   │  redb   │     │  redb   │     │  redb   │              │
+│   │(primary)│     │(replica)│     │(replica)│              │
+│   └─────────┘     └─────────┘     └─────────┘              │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Key Features
+
+- **Automatic leader election**: Uses Raft consensus for leader election
+- **Log replication**: All writes are replicated across nodes
+- **Read scaling**: Followers can serve read requests
+- **Automatic failover**: New leader elected if current leader fails
+- **Quorum-based writes**: Writes acknowledged after majority confirmation
+
+## Enabling Clustering
+
+### Environment Variables
+
+```bash
+# Enable clustering
+export REASONDB_CLUSTER_ENABLED=true
+
+# Node configuration
+export REASONDB_NODE_ID=node-1
+export REASONDB_CLUSTER_NAME=my-cluster
+export REASONDB_RAFT_ADDR=10.0.0.1:4445
+
+# Initial cluster members (for bootstrapping)
+export REASONDB_CLUSTER_MEMBERS="node-1@10.0.0.1:4445,node-2@10.0.0.2:4445,node-3@10.0.0.3:4445"
+
+# Optional settings
+export REASONDB_MIN_QUORUM=2
+export REASONDB_READ_SCALING=true
+```
+
+### CLI Arguments
+
+```bash
+reasondb serve \
+  --cluster-enabled \
+  --node-id node-1 \
+  --cluster-name my-cluster \
+  --raft-addr 10.0.0.1:4445 \
+  --cluster-members "node-1@10.0.0.1:4445,node-2@10.0.0.2:4445"
+```
+
+## Setting Up a 3-Node Cluster
+
+### Node 1 (Initial Leader)
+
+```bash
+# Start the first node
+reasondb serve \
+  --host 10.0.0.1 \
+  --port 4444 \
+  --cluster-enabled \
+  --node-id node-1 \
+  --raft-addr 10.0.0.1:4445
+```
+
+### Node 2
+
+```bash
+reasondb serve \
+  --host 10.0.0.2 \
+  --port 4444 \
+  --cluster-enabled \
+  --node-id node-2 \
+  --raft-addr 10.0.0.2:4445 \
+  --cluster-members "node-1@10.0.0.1:4445"
+```
+
+### Node 3
+
+```bash
+reasondb serve \
+  --host 10.0.0.3 \
+  --port 4444 \
+  --cluster-enabled \
+  --node-id node-3 \
+  --raft-addr 10.0.0.3:4445 \
+  --cluster-members "node-1@10.0.0.1:4445,node-2@10.0.0.2:4445"
+```
+
+## Managing the Cluster
+
+### CLI Commands
+
+```bash
+# Check cluster status
+reasondb cluster status --server http://10.0.0.1:4444
+
+# List all nodes
+reasondb cluster nodes --server http://10.0.0.1:4444
+
+# Get leader information
+reasondb cluster leader --server http://10.0.0.1:4444
+
+# Check cluster health
+reasondb cluster health --server http://10.0.0.1:4444
+
+# Add a new node
+reasondb cluster add-node \
+  --node-id node-4 \
+  --raft-addr 10.0.0.4:4445 \
+  --server http://10.0.0.1:4444
+
+# Remove a node
+reasondb cluster remove-node \
+  --node-id node-4 \
+  --server http://10.0.0.1:4444
+```
+
+### API Endpoints
+
+#### Get Cluster Status
+
+```bash
+curl http://localhost:4444/v1/cluster/status
+```
+
+Response:
+```json
+{
+  "enabled": true,
+  "node_id": "node-1",
+  "role": "Leader",
+  "term": 5,
+  "leader_id": "node-1",
+  "node_count": 3,
+  "last_applied": 142,
+  "commit_index": 142,
+  "has_quorum": true,
+  "cluster_name": "my-cluster"
+}
+```
+
+#### List Nodes
+
+```bash
+curl http://localhost:4444/v1/cluster/nodes
+```
+
+Response:
+```json
+{
+  "nodes": [
+    {
+      "id": "node-1",
+      "name": "node-1",
+      "api_addr": "10.0.0.1:4444",
+      "raft_addr": "10.0.0.1:4445",
+      "role": "Leader",
+      "status": "Healthy",
+      "is_leader": true,
+      "can_serve_reads": true,
+      "last_heartbeat": 1706644800
+    },
+    {
+      "id": "node-2",
+      "name": "node-2",
+      "api_addr": "10.0.0.2:4444",
+      "raft_addr": "10.0.0.2:4445",
+      "role": "Follower",
+      "status": "Healthy",
+      "is_leader": false,
+      "can_serve_reads": true,
+      "last_heartbeat": 1706644800
+    }
+  ],
+  "count": 2
+}
+```
+
+#### Add a Node
+
+```bash
+curl -X POST http://localhost:4444/v1/cluster/nodes/add \
+  -H "Content-Type: application/json" \
+  -d '{"node_id": "node-4", "raft_addr": "10.0.0.4:4445"}'
+```
+
+#### Remove a Node
+
+```bash
+curl -X POST http://localhost:4444/v1/cluster/nodes/remove \
+  -H "Content-Type: application/json" \
+  -d '{"node_id": "node-4"}'
+```
+
+#### Cluster Health
+
+```bash
+curl http://localhost:4444/v1/cluster/health
+```
+
+Response:
+```json
+{
+  "healthy": true,
+  "has_quorum": true,
+  "has_leader": true,
+  "node_count": 3,
+  "role": "Follower"
+}
+```
+
+## Node Roles
+
+| Role | Description | Can Write | Can Read |
+|------|-------------|-----------|----------|
+| **Leader** | Handles all writes, coordinates replication | ✓ | ✓ |
+| **Follower** | Replicates from leader, serves reads (if enabled) | ✗ | ✓ |
+| **Candidate** | Participating in leader election | ✗ | ✗ |
+| **Learner** | Non-voting member, catching up | ✗ | ✗ |
+
+## Node Status
+
+| Status | Description |
+|--------|-------------|
+| **Healthy** | Node is operational and responding |
+| **Suspect** | Node may be experiencing issues |
+| **Down** | Node is confirmed offline |
+| **Joining** | Node is joining the cluster |
+| **Leaving** | Node is being removed from cluster |
+
+## Read Scaling
+
+When read scaling is enabled (`REASONDB_READ_SCALING=true`), read requests can be served by any healthy follower, improving read throughput.
+
+```bash
+# Enable read scaling
+export REASONDB_READ_SCALING=true
+```
+
+### Load Balancing
+
+Configure your load balancer to distribute read requests across all nodes:
+
+```nginx
+upstream reasondb_read {
+    server 10.0.0.1:4444;
+    server 10.0.0.2:4444;
+    server 10.0.0.3:4444;
+}
+
+upstream reasondb_write {
+    server 10.0.0.1:4444;  # Leader only
+}
+```
+
+## Quorum and Consistency
+
+ReasonDB uses quorum-based writes to ensure consistency:
+
+| Cluster Size | Required Quorum | Tolerated Failures |
+|--------------|-----------------|-------------------|
+| 1 node | 1 | 0 |
+| 3 nodes | 2 | 1 |
+| 5 nodes | 3 | 2 |
+| 7 nodes | 4 | 3 |
+
+### Configure Minimum Quorum
+
+```bash
+export REASONDB_MIN_QUORUM=2
+```
+
+## Failover
+
+When the leader fails:
+
+1. **Detection**: Followers detect missing heartbeats
+2. **Election**: Candidates start election with higher term
+3. **Voting**: Nodes vote for candidates with up-to-date logs
+4. **New Leader**: Candidate with majority becomes leader
+5. **Recovery**: New leader resumes replication
+
+Typical failover time: **150-300ms**
+
+## Docker Compose Example
+
+```yaml
+version: '3.8'
+
+services:
+  node1:
+    image: reasondb:latest
+    environment:
+      - REASONDB_CLUSTER_ENABLED=true
+      - REASONDB_NODE_ID=node-1
+      - REASONDB_CLUSTER_NAME=reasondb-cluster
+      - REASONDB_HOST=node1
+      - REASONDB_PORT=4444
+      - REASONDB_RAFT_ADDR=node1:4445
+    ports:
+      - "4444:4444"
+    volumes:
+      - node1-data:/data
+
+  node2:
+    image: reasondb:latest
+    environment:
+      - REASONDB_CLUSTER_ENABLED=true
+      - REASONDB_NODE_ID=node-2
+      - REASONDB_CLUSTER_NAME=reasondb-cluster
+      - REASONDB_HOST=node2
+      - REASONDB_PORT=4444
+      - REASONDB_RAFT_ADDR=node2:4445
+      - REASONDB_CLUSTER_MEMBERS=node-1@node1:4445
+    ports:
+      - "4445:4444"
+    volumes:
+      - node2-data:/data
+    depends_on:
+      - node1
+
+  node3:
+    image: reasondb:latest
+    environment:
+      - REASONDB_CLUSTER_ENABLED=true
+      - REASONDB_NODE_ID=node-3
+      - REASONDB_CLUSTER_NAME=reasondb-cluster
+      - REASONDB_HOST=node3
+      - REASONDB_PORT=4444
+      - REASONDB_RAFT_ADDR=node3:4445
+      - REASONDB_CLUSTER_MEMBERS=node-1@node1:4445,node-2@node2:4445
+    ports:
+      - "4446:4444"
+    volumes:
+      - node3-data:/data
+    depends_on:
+      - node1
+      - node2
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:
+```
+
+## Kubernetes Deployment
+
+Use a StatefulSet for proper node identity:
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: reasondb
+spec:
+  serviceName: reasondb
+  replicas: 3
+  selector:
+    matchLabels:
+      app: reasondb
+  template:
+    metadata:
+      labels:
+        app: reasondb
+    spec:
+      containers:
+      - name: reasondb
+        image: reasondb:latest
+        env:
+        - name: REASONDB_CLUSTER_ENABLED
+          value: "true"
+        - name: REASONDB_NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: REASONDB_CLUSTER_NAME
+          value: "reasondb-cluster"
+        ports:
+        - containerPort: 4444
+          name: api
+        - containerPort: 4445
+          name: raft
+        volumeMounts:
+        - name: data
+          mountPath: /data
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+```
+
+## Best Practices
+
+### Production Checklist
+
+- [ ] Use odd number of nodes (3, 5, 7) for clean majorities
+- [ ] Place nodes in different availability zones
+- [ ] Configure appropriate timeouts for your network
+- [ ] Monitor cluster health with `/v1/cluster/health`
+- [ ] Set up alerting for quorum loss
+- [ ] Regular backup of leader node data
+
+### Network Configuration
+
+```bash
+# Recommended timeout settings
+export REASONDB_HEARTBEAT_TIMEOUT=5s
+export REASONDB_ELECTION_TIMEOUT_MIN=150ms
+export REASONDB_ELECTION_TIMEOUT_MAX=300ms
+```
+
+### Monitoring
+
+Monitor these metrics:
+- `cluster_node_count` - Number of nodes
+- `cluster_has_quorum` - Quorum status
+- `cluster_term` - Current Raft term
+- `cluster_commit_index` - Replication progress
+- `cluster_replication_lag` - Follower lag
+
+## Troubleshooting
+
+### No Leader Elected
+
+```bash
+# Check cluster status on all nodes
+for node in node1 node2 node3; do
+  curl http://$node:4444/v1/cluster/status
+done
+```
+
+Possible causes:
+- Network partition between nodes
+- Insufficient quorum
+- All nodes started simultaneously (add delay)
+
+### Replication Lag
+
+```bash
+# Check commit index vs last applied
+curl http://localhost:4444/v1/cluster/status | jq '.commit_index - .last_applied'
+```
+
+If lag is high:
+- Check network connectivity
+- Verify disk I/O performance
+- Consider adding more nodes
+
+### Split Brain
+
+Prevention:
+- Always maintain odd number of nodes
+- Configure proper quorum size
+- Use reliable network between nodes

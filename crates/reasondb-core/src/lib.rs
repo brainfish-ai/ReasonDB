@@ -45,6 +45,7 @@
 
 pub mod auth;
 pub mod cache;
+pub mod cluster;
 pub mod engine;
 pub mod error;
 pub mod llm;
@@ -63,6 +64,10 @@ pub use llm::{LLMProvider, MockReasoner, Reasoner, ReasoningEngine};
 pub use model::{
     Document, DocumentId, DocumentRelation, NodeId, NodeMetadata, PageNode, RelationBuilder,
     RelationType, SearchFilter, Table, TableId,
+};
+pub use cluster::{
+    ClusterConfig, ClusterNode, ClusterState, ClusterStateMachine, LogEntry, LogEntryType,
+    NetworkClient, NetworkMessage, NodeConfig, NodeId as ClusterNodeId, NodeRole, NodeStatus, RaftNode,
 };
 pub use ratelimit::{RateLimitConfig, RateLimitResult, RateLimitStore, RateLimitTier, RateLimiter};
 pub use store::{NodeStore, StoreStats};

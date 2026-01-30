@@ -54,6 +54,7 @@ pub struct RateLimitStore {
     /// Custom configs per client
     custom_configs: RwLock<HashMap<ClientId, RateLimitConfig>>,
     /// Cleanup interval
+    #[allow(dead_code)]
     cleanup_interval: Duration,
     /// Entry expiry time
     entry_expiry: Duration,

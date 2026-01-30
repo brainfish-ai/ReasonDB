@@ -24,6 +24,7 @@ mod tables;
 mod tests;
 
 use std::path::Path;
+use std::sync::Arc;
 
 use redb::{Database, MultimapTableDefinition, TableDefinition};
 
@@ -96,7 +97,7 @@ pub(crate) const IDX_TABLE_SLUG: TableDefinition<&str, &str> =
 /// # }
 /// ```
 pub struct NodeStore {
-    pub(crate) db: Database,
+    pub(crate) db: Arc<Database>,
 }
 
 impl NodeStore {
@@ -112,7 +113,30 @@ impl NodeStore {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let db = Database::create(path).map_err(StorageError::from)?;
         Self::initialize_tables(&db)?;
+        Ok(Self { db: Arc::new(db) })
+    }
+
+    /// Create a NodeStore from an existing database instance.
+    ///
+    /// This is useful when sharing a database between multiple components.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - An existing Arc<Database> instance
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the tables cannot be initialized.
+    pub fn from_db(db: Arc<Database>) -> Result<Self> {
+        Self::initialize_tables(&db)?;
         Ok(Self { db })
+    }
+
+    /// Get a reference to the underlying database Arc.
+    ///
+    /// This can be used to share the database with other components.
+    pub fn database(&self) -> Arc<Database> {
+        Arc::clone(&self.db)
     }
 
     /// Initialize all database tables.

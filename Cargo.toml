@@ -53,3 +53,6 @@ schemars = "0.8"
 
 # Testing
 tempfile = "3.9"
+
+# Clustering
+byteorder = "1.5"

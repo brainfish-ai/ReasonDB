@@ -95,6 +95,12 @@ reasondb export ./backup.json --table contracts
 # Check server health
 reasondb health
 
+# Cluster management
+reasondb cluster status            # Check cluster status
+reasondb cluster nodes             # List all cluster nodes
+reasondb cluster health            # Check cluster health
+reasondb cluster add-node --node-id node-2 --raft-addr 10.0.0.2:4445
+
 # Generate shell completions
 reasondb completions zsh >> ~/.zshrc
 ```
@@ -264,7 +270,7 @@ reasondb/
 - [x] **Phase 5G**: Configuration management (PostgreSQL-like) ✅
 - [x] **Phase 6A**: Authentication & API keys ✅
 - [x] **Phase 6B**: Rate limiting ✅
-- [ ] **Phase 6C**: Clustering & replication
+- [x] **Phase 6C**: Clustering & replication ✅
 
 ## 🔧 Configuration
 

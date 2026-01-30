@@ -13,6 +13,34 @@ pub enum OutputFormat {
     Csv,
 }
 
+/// Output handler for formatting CLI output
+#[derive(Debug, Clone, Copy)]
+pub struct Output {
+    format: OutputFormat,
+}
+
+impl Output {
+    /// Create a new output handler
+    pub fn new(format: OutputFormat) -> Self {
+        Self { format }
+    }
+
+    /// Check if JSON format is requested
+    pub fn is_json(&self) -> bool {
+        matches!(self.format, OutputFormat::Json)
+    }
+
+    /// Check if table format is requested
+    pub fn is_table(&self) -> bool {
+        matches!(self.format, OutputFormat::Table)
+    }
+
+    /// Get the format
+    pub fn format(&self) -> OutputFormat {
+        self.format
+    }
+}
+
 /// Print data in the specified format
 #[allow(dead_code)]
 pub fn print_data<T: Serialize>(data: &T, format: OutputFormat) {

@@ -32,6 +32,9 @@ pub enum ApiError {
     #[error("Rate limit exceeded: {0}")]
     RateLimited(String),
 
+    #[error("Service unavailable: {0}")]
+    ServiceUnavailable(String),
+
     #[error("Storage error: {0}")]
     StorageError(String),
 
@@ -79,6 +82,7 @@ impl IntoResponse for ApiError {
             ApiError::Unauthorized(_) => (StatusCode::UNAUTHORIZED, "UNAUTHORIZED"),
             ApiError::Forbidden(_) => (StatusCode::FORBIDDEN, "FORBIDDEN"),
             ApiError::RateLimited(_) => (StatusCode::TOO_MANY_REQUESTS, "RATE_LIMITED"),
+            ApiError::ServiceUnavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE"),
             ApiError::StorageError(_) => (StatusCode::INTERNAL_SERVER_ERROR, "STORAGE_ERROR"),
             ApiError::IngestionError(_) => (StatusCode::INTERNAL_SERVER_ERROR, "INGESTION_ERROR"),
             ApiError::SearchError(_) => (StatusCode::INTERNAL_SERVER_ERROR, "SEARCH_ERROR"),

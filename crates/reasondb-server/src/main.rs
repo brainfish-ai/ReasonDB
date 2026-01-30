@@ -9,7 +9,7 @@ use reasondb_core::{
     store::NodeStore,
     text_index::TextIndex,
 };
-use reasondb_server::{create_server, AppState, AuthConfig, RateLimitConfig, ServerConfig};
+use reasondb_server::{create_server, AppState, AuthConfig, ClusterNodeConfig, RateLimitConfig, ServerConfig};
 use redb::Database;
 use std::sync::Arc;
 use tracing::{info, Level};
@@ -76,6 +76,26 @@ struct Args {
     #[arg(long, env = "REASONDB_RATE_LIMIT_BURST", default_value = "10")]
     rate_limit_burst: u32,
 
+    /// Enable clustering
+    #[arg(long, env = "REASONDB_CLUSTER_ENABLED")]
+    cluster_enabled: bool,
+
+    /// Node ID for clustering
+    #[arg(long, env = "REASONDB_NODE_ID")]
+    node_id: Option<String>,
+
+    /// Cluster name
+    #[arg(long, env = "REASONDB_CLUSTER_NAME", default_value = "reasondb-cluster")]
+    cluster_name: String,
+
+    /// Raft address for cluster communication
+    #[arg(long, env = "REASONDB_RAFT_ADDR", default_value = "127.0.0.1:4445")]
+    raft_addr: String,
+
+    /// Initial cluster members (comma-separated node_id@host:port)
+    #[arg(long, env = "REASONDB_CLUSTER_MEMBERS")]
+    cluster_members: Option<String>,
+
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
@@ -102,10 +122,10 @@ async fn main() -> anyhow::Result<()> {
         std::fs::create_dir_all(data_dir)?;
     }
 
-    // Open database
+    // Open database (shared between all stores)
     info!("Opening database: {}", args.database);
     let db = Arc::new(Database::create(&args.database)?);
-    let store = NodeStore::open(&args.database)?;
+    let store = NodeStore::from_db(Arc::clone(&db))?;
 
     // Open or create text index for BM25 search (in same directory as database)
     let db_path = std::path::Path::new(&args.database);
@@ -143,6 +163,29 @@ async fn main() -> anyhow::Result<()> {
         burst_size: args.rate_limit_burst,
     };
 
+    // Cluster configuration
+    let cluster_config = ClusterNodeConfig {
+        enabled: args.cluster_enabled,
+        node_id: args.node_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        cluster_name: args.cluster_name.clone(),
+        raft_addr: args.raft_addr.clone(),
+        initial_members: args.cluster_members
+            .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
+            .unwrap_or_default(),
+        min_quorum: 2,
+        enable_read_scaling: true,
+    };
+
+    if cluster_config.enabled {
+        info!("Clustering enabled");
+        info!("  Node ID: {}", cluster_config.node_id);
+        info!("  Cluster: {}", cluster_config.cluster_name);
+        info!("  Raft address: {}", cluster_config.raft_addr);
+        if !cluster_config.initial_members.is_empty() {
+            info!("  Initial members: {:?}", cluster_config.initial_members);
+        }
+    }
+
     // Create server config
     let config = ServerConfig {
         host: args.host.clone(),
@@ -153,6 +196,7 @@ async fn main() -> anyhow::Result<()> {
         generate_summaries: !args.no_summaries,
         auth: auth_config,
         rate_limit: rate_limit_config,
+        cluster: cluster_config,
     };
 
     // Create appropriate reasoner based on available API keys

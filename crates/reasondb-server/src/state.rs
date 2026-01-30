@@ -5,6 +5,7 @@
 use reasondb_core::{
     auth::ApiKeyStore,
     cache::QueryCache,
+    cluster::{ClusterConfig, ClusterStateMachine, NodeId, RaftNode},
     llm::{mock::MockReasoner, provider::Reasoner, ReasoningEngine},
     ratelimit::RateLimitStore,
     store::NodeStore,
@@ -26,6 +27,8 @@ pub struct AppState<R: ReasoningEngine = Reasoner> {
     pub api_key_store: Arc<ApiKeyStore>,
     /// Rate limit store
     pub rate_limit_store: Arc<RateLimitStore>,
+    /// Cluster node (if clustering enabled)
+    pub cluster_node: Option<Arc<RaftNode>>,
     /// Server configuration
     pub config: ServerConfig,
 }
@@ -40,6 +43,23 @@ impl<R: ReasoningEngine> AppState<R> {
         config: ServerConfig,
     ) -> Self {
         let rate_limit_store = RateLimitStore::new(config.rate_limit.clone());
+        
+        // Initialize cluster node if clustering is enabled
+        let cluster_node = if config.cluster.enabled {
+            let node_id = NodeId::new(config.cluster.node_id.clone());
+            let cluster_config = ClusterConfig {
+                cluster_name: config.cluster.cluster_name.clone(),
+                min_quorum: config.cluster.min_quorum,
+                auto_failover: true,
+                enable_read_scaling: config.cluster.enable_read_scaling,
+                ..Default::default()
+            };
+            let state_machine = Arc::new(ClusterStateMachine::new());
+            Some(Arc::new(RaftNode::new(node_id, cluster_config, state_machine)))
+        } else {
+            None
+        };
+        
         Self {
             store: Arc::new(store),
             text_index: Arc::new(text_index),
@@ -47,8 +67,27 @@ impl<R: ReasoningEngine> AppState<R> {
             query_cache: Arc::new(QueryCache::new()),
             api_key_store: Arc::new(api_key_store),
             rate_limit_store: Arc::new(rate_limit_store),
+            cluster_node,
             config,
         }
+    }
+    
+    /// Check if this node is the leader
+    pub async fn is_leader(&self) -> bool {
+        match &self.cluster_node {
+            Some(node) => node.is_leader().await,
+            None => true, // Single node is always leader
+        }
+    }
+    
+    /// Check if this node can accept writes
+    pub async fn can_accept_writes(&self) -> bool {
+        self.is_leader().await
+    }
+    
+    /// Check if clustering is enabled
+    pub fn is_clustered(&self) -> bool {
+        self.cluster_node.is_some()
     }
 }
 
@@ -89,6 +128,80 @@ impl AuthConfig {
 /// Rate limit configuration (re-exported)
 pub use reasondb_core::ratelimit::RateLimitConfig;
 
+/// Cluster configuration for this server node
+#[derive(Debug, Clone)]
+pub struct ClusterNodeConfig {
+    /// Enable clustering (if false, runs in single-node mode)
+    pub enabled: bool,
+    /// This node's unique identifier
+    pub node_id: String,
+    /// Cluster name for identification
+    pub cluster_name: String,
+    /// Address for Raft communication (e.g., "127.0.0.1:4445")
+    pub raft_addr: String,
+    /// Initial cluster members (comma-separated "node_id@host:port")
+    pub initial_members: Vec<String>,
+    /// Minimum quorum size
+    pub min_quorum: usize,
+    /// Enable read scaling (serve reads from replicas)
+    pub enable_read_scaling: bool,
+}
+
+impl Default for ClusterNodeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            node_id: uuid::Uuid::new_v4().to_string(),
+            cluster_name: "reasondb-cluster".to_string(),
+            raft_addr: "127.0.0.1:4445".to_string(),
+            initial_members: vec![],
+            min_quorum: 2,
+            enable_read_scaling: true,
+        }
+    }
+}
+
+impl ClusterNodeConfig {
+    /// Create from environment variables
+    pub fn from_env() -> Self {
+        let enabled = std::env::var("REASONDB_CLUSTER_ENABLED")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
+            
+        let node_id = std::env::var("REASONDB_NODE_ID")
+            .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+            
+        let cluster_name = std::env::var("REASONDB_CLUSTER_NAME")
+            .unwrap_or_else(|_| "reasondb-cluster".to_string());
+            
+        let raft_addr = std::env::var("REASONDB_RAFT_ADDR")
+            .unwrap_or_else(|_| "127.0.0.1:4445".to_string());
+            
+        let initial_members = std::env::var("REASONDB_CLUSTER_MEMBERS")
+            .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
+            .unwrap_or_default();
+            
+        let min_quorum = std::env::var("REASONDB_MIN_QUORUM")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2);
+            
+        let enable_read_scaling = std::env::var("REASONDB_READ_SCALING")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(true);
+        
+        Self {
+            enabled,
+            node_id,
+            cluster_name,
+            raft_addr,
+            initial_members,
+            min_quorum,
+            enable_read_scaling,
+        }
+    }
+}
+
 /// Server configuration
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -108,6 +221,8 @@ pub struct ServerConfig {
     pub auth: AuthConfig,
     /// Rate limiting configuration
     pub rate_limit: RateLimitConfig,
+    /// Cluster configuration
+    pub cluster: ClusterNodeConfig,
 }
 
 impl Default for ServerConfig {
@@ -121,6 +236,7 @@ impl Default for ServerConfig {
             generate_summaries: true,
             auth: AuthConfig::default(),
             rate_limit: RateLimitConfig::default(),
+            cluster: ClusterNodeConfig::default(),
         }
     }
 }

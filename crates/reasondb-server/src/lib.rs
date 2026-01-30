@@ -61,7 +61,7 @@ pub use error::{ApiError, ApiResult, ErrorResponse};
 pub use openapi::ApiDoc;
 pub use ratelimit::{rate_limit_middleware, RateLimitError};
 pub use routes::create_routes;
-pub use state::{AppState, AuthConfig, MockAppState, RealAppState, ServerConfig};
+pub use state::{AppState, AuthConfig, ClusterNodeConfig, MockAppState, RealAppState, ServerConfig};
 pub use reasondb_core::ratelimit::RateLimitConfig;
 
 use axum::Router;
@@ -198,6 +198,12 @@ pub async fn run_server() -> anyhow::Result<()> {
     // Load rate limit configuration from environment
     let rate_limit_config = reasondb_core::ratelimit::RateLimitConfig::from_env();
 
+    // Load cluster configuration from environment
+    let cluster_config = ClusterNodeConfig::from_env();
+    if cluster_config.enabled {
+        info!("Clustering enabled - Node: {}", cluster_config.node_id);
+    }
+
     // Create server config
     let config = ServerConfig {
         host: host.clone(),
@@ -208,6 +214,7 @@ pub async fn run_server() -> anyhow::Result<()> {
         generate_summaries: true,
         auth: auth_config,
         rate_limit: rate_limit_config,
+        cluster: cluster_config,
     };
 
     let addr = format!("{}:{}", host, port);

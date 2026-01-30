@@ -29,7 +29,8 @@
               "guides/relationships",
               "guides/configuration",
               "guides/authentication",
-              "guides/rate-limiting"
+              "guides/rate-limiting",
+              "guides/clustering"
             ]
           },
           {

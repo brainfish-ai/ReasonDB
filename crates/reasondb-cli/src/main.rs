@@ -120,6 +120,10 @@ enum Commands {
     #[command(subcommand)]
     Auth(commands::auth::AuthCommands),
 
+    /// Manage cluster operations
+    #[command(subcommand)]
+    Cluster(commands::cluster::ClusterCommands),
+
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for
@@ -254,6 +258,10 @@ async fn main() -> Result<()> {
         }
         Commands::Auth(cmd) => {
             commands::auth::run(&cli.url, cmd).await
+        }
+        Commands::Cluster(cmd) => {
+            let output = output::Output::new(cli.format);
+            commands::cluster::execute(cmd, output).await
         }
         Commands::Completions { shell } => {
             commands::completions::run(shell);
