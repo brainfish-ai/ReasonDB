@@ -9,6 +9,7 @@
 //! - Search engine with beam search
 //! - Filtering with `SearchFilter`
 //! - RQL query language
+//! - Authentication & API key management
 //!
 //! ## Example
 //!
@@ -42,6 +43,7 @@
 //! # }
 //! ```
 
+pub mod auth;
 pub mod cache;
 pub mod engine;
 pub mod error;
@@ -52,9 +54,10 @@ pub mod store;
 pub mod text_index;
 
 // Re-export main types
+pub use auth::{ApiKey, ApiKeyId, ApiKeyMetadata, ApiKeyStore, KeyPrefix, Permission, Permissions};
 pub use cache::{CachedDocSummary, CachedMatch, CachedQueryResult, QueryCache, QueryCacheStats, SummaryCache};
 pub use engine::{SearchConfig, SearchEngine, SearchResult};
-pub use error::{ReasonError, Result};
+pub use error::{ReasonDBError, ReasonError, Result};
 pub use llm::{LLMProvider, MockReasoner, Reasoner, ReasoningEngine};
 pub use model::{
     Document, DocumentId, DocumentRelation, NodeId, NodeMetadata, PageNode, RelationBuilder,

@@ -4,11 +4,13 @@
 
 use clap::Parser;
 use reasondb_core::{
+    auth::ApiKeyStore,
     llm::{mock::MockReasoner, provider::LLMProvider, provider::Reasoner},
     store::NodeStore,
     text_index::TextIndex,
 };
-use reasondb_server::{create_server, AppState, ServerConfig};
+use reasondb_server::{create_server, AppState, AuthConfig, ServerConfig};
+use redb::Database;
 use std::sync::Arc;
 use tracing::{info, Level};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -50,6 +52,14 @@ struct Args {
     #[arg(long, default_value = "100")]
     max_upload_mb: usize,
 
+    /// Enable authentication
+    #[arg(long, env = "REASONDB_AUTH_ENABLED")]
+    auth_enabled: bool,
+
+    /// Master key for admin access (bypasses API key checks)
+    #[arg(long, env = "REASONDB_MASTER_KEY")]
+    master_key: Option<String>,
+
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
@@ -69,23 +79,45 @@ async fn main() -> anyhow::Result<()> {
     info!("Starting ReasonDB server v{}", env!("CARGO_PKG_VERSION"));
 
     // Create data directory if it doesn't exist
-    let data_dir = std::path::Path::new(&args.database).parent().unwrap_or(std::path::Path::new("."));
+    let data_dir = std::path::Path::new(&args.database)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
     if !data_dir.exists() && data_dir != std::path::Path::new(".") {
         std::fs::create_dir_all(data_dir)?;
     }
 
     // Open database
     info!("Opening database: {}", args.database);
+    let db = Arc::new(Database::create(&args.database)?);
     let store = NodeStore::open(&args.database)?;
 
     // Open or create text index for BM25 search (in same directory as database)
     let db_path = std::path::Path::new(&args.database);
     let db_name = db_path.file_stem().unwrap_or_default().to_string_lossy();
-    let text_index_path = db_path.parent()
+    let text_index_path = db_path
+        .parent()
         .unwrap_or(std::path::Path::new("."))
         .join(format!("{}_search_index", db_name));
     info!("Opening text index: {}", text_index_path.display());
     let text_index = TextIndex::open(&text_index_path)?;
+
+    // Create API key store
+    let api_key_store = ApiKeyStore::new(db)?;
+
+    // Auth configuration
+    let auth_config = AuthConfig {
+        enabled: args.auth_enabled,
+        master_key: args.master_key.clone(),
+    };
+
+    if auth_config.enabled {
+        info!("Authentication enabled");
+        if auth_config.master_key.is_some() {
+            info!("Master key configured");
+        }
+    } else {
+        info!("Authentication disabled (use --auth-enabled to enable)");
+    }
 
     // Create server config
     let config = ServerConfig {
@@ -95,6 +127,7 @@ async fn main() -> anyhow::Result<()> {
         max_upload_size: args.max_upload_mb * 1024 * 1024,
         enable_cors: true,
         generate_summaries: !args.no_summaries,
+        auth: auth_config,
     };
 
     // Create appropriate reasoner based on available API keys
@@ -103,7 +136,7 @@ async fn main() -> anyhow::Result<()> {
     if let Some(api_key) = args.openai_key {
         info!("Using OpenAI provider (gpt-4o model)");
         let reasoner = Reasoner::new(LLMProvider::openai(&api_key));
-        let state = Arc::new(AppState::new(store, text_index, reasoner, config));
+        let state = Arc::new(AppState::new(store, text_index, reasoner, api_key_store, config));
         let app = create_server(state);
 
         info!("Server listening on http://{}", addr);
@@ -118,7 +151,7 @@ async fn main() -> anyhow::Result<()> {
             LLMProvider::claude_sonnet(&api_key)
         };
         let reasoner = Reasoner::new(provider);
-        let state = Arc::new(AppState::new(store, text_index, reasoner, config));
+        let state = Arc::new(AppState::new(store, text_index, reasoner, api_key_store, config));
         let app = create_server(state);
 
         info!("Server listening on http://{}", addr);
@@ -127,7 +160,7 @@ async fn main() -> anyhow::Result<()> {
     } else {
         info!("No API key provided - using mock reasoner (summaries will be placeholder text)");
         let reasoner = MockReasoner::new();
-        let state = Arc::new(AppState::new(store, text_index, reasoner, config));
+        let state = Arc::new(AppState::new(store, text_index, reasoner, api_key_store, config));
         let app = create_server(state);
 
         info!("Server listening on http://{}", addr);

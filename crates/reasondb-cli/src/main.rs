@@ -112,9 +112,13 @@ enum Commands {
     /// Check server health
     Health,
 
-    /// Manage configuration (API keys, server settings)
+    /// Manage configuration (LLM provider, server settings)
     #[command(subcommand)]
     Config(commands::config::ConfigCommands),
+
+    /// Manage authentication (API keys)
+    #[command(subcommand)]
+    Auth(commands::auth::AuthCommands),
 
     /// Generate shell completions
     Completions {
@@ -247,6 +251,9 @@ async fn main() -> Result<()> {
         }
         Commands::Config(cmd) => {
             commands::config::run(cmd).await
+        }
+        Commands::Auth(cmd) => {
+            commands::auth::run(&cli.url, cmd).await
         }
         Commands::Completions { shell } => {
             commands::completions::run(shell);

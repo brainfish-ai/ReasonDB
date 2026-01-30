@@ -2,6 +2,7 @@
 //!
 //! All routes are versioned under `/v1/`.
 
+pub mod auth;
 pub mod documents;
 pub mod ingest;
 pub mod query;
@@ -61,6 +62,12 @@ fn v1_routes<R: ReasoningEngine + Clone + Send + Sync + 'static>(state: Arc<AppS
         .route("/relations", post(relations::create_relation::<R>))
         .route("/relations/:id", get(relations::get_relation::<R>))
         .route("/relations/:id", delete(relations::delete_relation::<R>))
+        // Authentication & API Keys
+        .route("/auth/keys", post(auth::create_key::<R>))
+        .route("/auth/keys", get(auth::list_keys::<R>))
+        .route("/auth/keys/:id", get(auth::get_key::<R>))
+        .route("/auth/keys/:id", delete(auth::revoke_key::<R>))
+        .route("/auth/keys/:id/rotate", post(auth::rotate_key::<R>))
         // State
         .with_state(state)
 }

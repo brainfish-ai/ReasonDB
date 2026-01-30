@@ -27,6 +27,10 @@ pub enum ReasonError {
     #[error("Table not found: {0}")]
     TableNotFound(String),
 
+    /// Generic not found
+    #[error("Not found: {0}")]
+    NotFound(String),
+
     /// Invalid operation
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
@@ -35,10 +39,21 @@ pub enum ReasonError {
     #[error("Reasoning error: {0}")]
     Reasoning(String),
 
+    /// Authentication error
+    #[error("Authentication error: {0}")]
+    Auth(String),
+
+    /// Authorization error (permission denied)
+    #[error("Permission denied: {0}")]
+    PermissionDenied(String),
+
     /// Generic internal error
     #[error("Internal error: {0}")]
     Internal(String),
 }
+
+/// Alias for backward compatibility
+pub type ReasonDBError = ReasonError;
 
 /// Storage-specific errors
 #[derive(Error, Debug)]
@@ -125,6 +140,43 @@ impl From<redb::StorageError> for StorageError {
 impl From<bincode::Error> for ReasonError {
     fn from(err: bincode::Error) -> Self {
         ReasonError::Serialization(err.to_string())
+    }
+}
+
+/// Convert redb errors directly to ReasonError
+impl From<redb::Error> for ReasonError {
+    fn from(err: redb::Error) -> Self {
+        ReasonError::Storage(StorageError::OpenError(err.to_string()))
+    }
+}
+
+impl From<redb::DatabaseError> for ReasonError {
+    fn from(err: redb::DatabaseError) -> Self {
+        ReasonError::Storage(StorageError::OpenError(err.to_string()))
+    }
+}
+
+impl From<redb::TableError> for ReasonError {
+    fn from(err: redb::TableError) -> Self {
+        ReasonError::Storage(StorageError::TableError(err.to_string()))
+    }
+}
+
+impl From<redb::TransactionError> for ReasonError {
+    fn from(err: redb::TransactionError) -> Self {
+        ReasonError::Storage(StorageError::TransactionError(err.to_string()))
+    }
+}
+
+impl From<redb::CommitError> for ReasonError {
+    fn from(err: redb::CommitError) -> Self {
+        ReasonError::Storage(StorageError::TransactionError(err.to_string()))
+    }
+}
+
+impl From<redb::StorageError> for ReasonError {
+    fn from(err: redb::StorageError) -> Self {
+        ReasonError::Storage(StorageError::OpenError(err.to_string()))
     }
 }
 

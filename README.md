@@ -262,7 +262,9 @@ reasondb/
 - [x] **Phase 5E**: Document relationships ✅
 - [x] **Phase 5F**: CLI tool with RQL REPL ✅
 - [x] **Phase 5G**: Configuration management (PostgreSQL-like) ✅
-- [ ] **Phase 6**: Production features (auth, rate limiting, clustering)
+- [x] **Phase 6A**: Authentication & API keys ✅
+- [ ] **Phase 6B**: Rate limiting
+- [ ] **Phase 6C**: Clustering & replication
 
 ## 🔧 Configuration
 
@@ -296,6 +298,64 @@ Config file location:
 | `REASONDB_PORT` | Server port | 4444 |
 | `REASONDB_HOST` | Server host | 127.0.0.1 |
 | `REASONDB_PATH` | Database file path | reasondb.redb |
+| `REASONDB_AUTH_ENABLED` | Enable API key auth | false |
+| `REASONDB_MASTER_KEY` | Admin master key | - |
+
+## 🔐 Authentication
+
+ReasonDB supports API key authentication for production deployments.
+
+### Enable Authentication
+
+```bash
+# Start server with auth enabled
+reasondb serve --auth-enabled --master-key "your-secret-master-key"
+
+# Or via environment
+REASONDB_AUTH_ENABLED=true REASONDB_MASTER_KEY=xxx reasondb serve
+```
+
+### Manage API Keys
+
+```bash
+# Create an API key (requires master key)
+REASONDB_MASTER_KEY=xxx reasondb auth keys create "my-app" --environment live
+
+# List all keys
+REASONDB_MASTER_KEY=xxx reasondb auth keys list
+
+# Revoke a key
+REASONDB_MASTER_KEY=xxx reasondb auth keys revoke key_abc123
+
+# Rotate a key (revoke old, create new)
+REASONDB_MASTER_KEY=xxx reasondb auth keys rotate key_abc123
+```
+
+### Using API Keys
+
+```bash
+# With Authorization header
+curl -H "Authorization: Bearer rdb_live_xxxxx" http://localhost:4444/v1/search ...
+
+# Or X-API-Key header
+curl -H "X-API-Key: rdb_live_xxxxx" http://localhost:4444/v1/search ...
+```
+
+### API Key Format
+
+- `rdb_live_<32chars>` - Production keys
+- `rdb_test_<32chars>` - Development/test keys
+
+### Permissions
+
+| Permission | Description |
+|-----------|-------------|
+| `read` | Search, query, list documents |
+| `write` | Create, update, delete documents |
+| `ingest` | Ingest new documents |
+| `query` | Execute RQL queries |
+| `relations` | Manage document relationships |
+| `admin` | Manage API keys |
 
 ## 📄 Documentation
 

@@ -33,6 +33,11 @@ chrono.workspace = true
 tracing.workspace = true
 regex.workspace = true
 
+# Authentication / cryptography
+sha2 = "0.10"
+hex = "0.4"
+rand = "0.8"
+
 # HTTP client
 reqwest.workspace = true
 

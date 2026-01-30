@@ -23,6 +23,12 @@ pub enum ApiError {
     #[error("Validation failed: {0}")]
     ValidationError(String),
 
+    #[error("Unauthorized: {0}")]
+    Unauthorized(String),
+
+    #[error("Forbidden: {0}")]
+    Forbidden(String),
+
     #[error("Storage error: {0}")]
     StorageError(String),
 
@@ -67,6 +73,8 @@ impl IntoResponse for ApiError {
             ApiError::NotFound(_) => (StatusCode::NOT_FOUND, "NOT_FOUND"),
             ApiError::BadRequest(_) => (StatusCode::BAD_REQUEST, "BAD_REQUEST"),
             ApiError::ValidationError(_) => (StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR"),
+            ApiError::Unauthorized(_) => (StatusCode::UNAUTHORIZED, "UNAUTHORIZED"),
+            ApiError::Forbidden(_) => (StatusCode::FORBIDDEN, "FORBIDDEN"),
             ApiError::StorageError(_) => (StatusCode::INTERNAL_SERVER_ERROR, "STORAGE_ERROR"),
             ApiError::IngestionError(_) => (StatusCode::INTERNAL_SERVER_ERROR, "INGESTION_ERROR"),
             ApiError::SearchError(_) => (StatusCode::INTERNAL_SERVER_ERROR, "SEARCH_ERROR"),
@@ -94,10 +102,13 @@ impl From<reasondb_core::error::ReasonError> for ApiError {
             ReasonError::NodeNotFound(id) => ApiError::NotFound(format!("Node not found: {}", id)),
             ReasonError::DocumentNotFound(id) => ApiError::NotFound(format!("Document not found: {}", id)),
             ReasonError::TableNotFound(id) => ApiError::NotFound(format!("Table not found: {}", id)),
+            ReasonError::NotFound(msg) => ApiError::NotFound(msg),
             ReasonError::InvalidOperation(msg) => ApiError::BadRequest(msg),
             ReasonError::Storage(e) => ApiError::StorageError(e.to_string()),
             ReasonError::Serialization(msg) => ApiError::Internal(format!("Serialization: {}", msg)),
             ReasonError::Reasoning(msg) => ApiError::LLMError(msg),
+            ReasonError::Auth(msg) => ApiError::Unauthorized(msg),
+            ReasonError::PermissionDenied(msg) => ApiError::Forbidden(msg),
             ReasonError::Internal(msg) => ApiError::Internal(msg),
         }
     }
