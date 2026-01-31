@@ -1,7 +1,37 @@
 import type * as Monaco from 'monaco-editor'
+import { 
+  getCompletions, 
+  setSchema, 
+  updateTableMetadataFields, 
+  updateTableMetadataFieldsFromSchema,
+  type DatabaseSchema, 
+  type TableSchema,
+  type MetadataSchemaField,
+} from './sql-completion'
 
 // RQL Language Definition for Monaco Editor
 export const RQL_LANGUAGE_ID = 'rql'
+
+// Re-export for convenience
+export { 
+  setSchema, 
+  updateTableMetadataFields, 
+  updateTableMetadataFieldsFromSchema,
+  type DatabaseSchema, 
+  type TableSchema,
+  type MetadataSchemaField,
+}
+
+// Update tables for autocompletion (converts to new schema format)
+export function updateRqlTables(tables: { name: string; fields: { name: string; type: string }[] }[]) {
+  const schema: DatabaseSchema = {
+    tables: tables.map(t => ({
+      name: t.name,
+      columns: t.fields.map(f => ({ name: f.name, type: f.type }))
+    }))
+  }
+  setSchema(schema)
+}
 
 export const rqlLanguageConfig: Monaco.languages.LanguageConfiguration = {
   comments: {
@@ -47,7 +77,7 @@ export const rqlTokensProvider: Monaco.languages.IMonarchLanguage = {
     // ReasonDB specific
     'REASON', 'ABOUT', 'SEARCH', 'SEMANTIC', 'EMBED', 'SIMILAR', 'TO',
     'SUMMARIZE', 'EXTRACT', 'CHUNK', 'RELATE', 'LINK',
-    'WITH', 'CONTEXT', 'THRESHOLD', 'TOP', 'VECTOR',
+    'WITH', 'CONTEXT', 'THRESHOLD', 'TOP', 'VECTOR', 'CONTAINS',
   ],
 
   operators: [
@@ -180,40 +210,6 @@ export const rqlTheme: Monaco.editor.IStandaloneThemeData = {
   },
 }
 
-// Auto-completion items for RQL
-export function getRqlCompletionItems(
-  monaco: typeof Monaco,
-  range: Monaco.IRange
-): Monaco.languages.CompletionItem[] {
-  const keywords = [
-    { label: 'SELECT', insertText: 'SELECT ', detail: 'Select columns from table' },
-    { label: 'FROM', insertText: 'FROM ', detail: 'Specify table name' },
-    { label: 'WHERE', insertText: 'WHERE ', detail: 'Filter conditions' },
-    { label: 'INSERT INTO', insertText: 'INSERT INTO ${1:table} (${2:columns}) VALUES (${3:values})', detail: 'Insert new row' },
-    { label: 'UPDATE', insertText: 'UPDATE ${1:table} SET ${2:column} = ${3:value}', detail: 'Update existing rows' },
-    { label: 'DELETE FROM', insertText: 'DELETE FROM ${1:table} WHERE ${2:condition}', detail: 'Delete rows' },
-    { label: 'CREATE TABLE', insertText: 'CREATE TABLE ${1:name} (\n  ${2:columns}\n)', detail: 'Create new table' },
-    { label: 'ORDER BY', insertText: 'ORDER BY ${1:column} ${2|ASC,DESC|}', detail: 'Sort results' },
-    { label: 'LIMIT', insertText: 'LIMIT ${1:10}', detail: 'Limit number of results' },
-    { label: 'GROUP BY', insertText: 'GROUP BY ${1:column}', detail: 'Group results' },
-    // ReasonDB specific
-    { label: 'REASON ABOUT', insertText: 'REASON ABOUT "${1:question}" FROM ${2:table}', detail: 'AI-powered reasoning query' },
-    { label: 'SEARCH SEMANTIC', insertText: 'SEARCH SEMANTIC "${1:query}" IN ${2:table}', detail: 'Semantic search' },
-    { label: 'SIMILAR TO', insertText: 'SIMILAR TO ${1:document_id} IN ${2:table} LIMIT ${3:10}', detail: 'Find similar documents' },
-    { label: 'SUMMARIZE', insertText: 'SUMMARIZE ${1:column} FROM ${2:table}', detail: 'AI summarization' },
-    { label: 'EXTRACT', insertText: 'EXTRACT ${1:entity_type} FROM ${2:column}', detail: 'Entity extraction' },
-  ]
-
-  return keywords.map((k) => ({
-    label: k.label,
-    kind: monaco.languages.CompletionItemKind.Keyword,
-    insertText: k.insertText,
-    insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-    detail: k.detail,
-    range,
-  }))
-}
-
 // Register RQL language with Monaco
 export function registerRqlLanguage(monaco: typeof Monaco) {
   // Register language
@@ -228,8 +224,9 @@ export function registerRqlLanguage(monaco: typeof Monaco) {
   // Register theme
   monaco.editor.defineTheme('rql-catppuccin', rqlTheme)
 
-  // Register completion provider
+  // Register completion provider using new SQL completion engine
   monaco.languages.registerCompletionItemProvider(RQL_LANGUAGE_ID, {
+    triggerCharacters: [' ', '.', ','],
     provideCompletionItems: (model, position) => {
       const word = model.getWordUntilPosition(position)
       const range: Monaco.IRange = {
@@ -238,9 +235,17 @@ export function registerRqlLanguage(monaco: typeof Monaco) {
         startColumn: word.startColumn,
         endColumn: word.endColumn,
       }
+      
+      // Get full text and cursor offset
+      const fullText = model.getValue()
+      const cursorOffset = model.getOffsetAt(position)
+      
       return {
-        suggestions: getRqlCompletionItems(monaco, range),
+        suggestions: getCompletions(monaco, fullText, cursorOffset, range),
       }
     },
   })
 }
+
+// Re-export for testing (kept for backward compatibility)
+export { detectContext as getCompletionContext } from './sql-completion'

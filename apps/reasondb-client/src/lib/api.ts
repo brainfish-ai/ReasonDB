@@ -86,6 +86,20 @@ export interface TableDocumentsResponse {
   total: number
 }
 
+// Metadata Schema (for autocompletion)
+export interface MetadataField {
+  path: string
+  field_type: string
+  occurrence_count: number
+}
+
+export interface MetadataSchemaResponse {
+  table_id: string
+  fields: MetadataField[]
+  documents_sampled: number
+  total_documents: number
+}
+
 // Nodes
 export interface NodeSummary {
   id: string
@@ -304,9 +318,27 @@ class ReasonDBClient {
   /**
    * Get documents in a table
    */
-  async getTableDocuments(tableId: string): Promise<TableDocumentsResponse> {
-    return this.request<TableDocumentsResponse>(
-      `/v1/tables/${encodeURIComponent(tableId)}/documents`
+  async getTableDocuments(
+    tableId: string,
+    options?: { limit?: number; offset?: number }
+  ): Promise<TableDocumentsResponse> {
+    const params = new URLSearchParams()
+    if (options?.limit) params.set('limit', options.limit.toString())
+    if (options?.offset) params.set('offset', options.offset.toString())
+    
+    const queryString = params.toString()
+    const url = `/v1/tables/${encodeURIComponent(tableId)}/documents${queryString ? `?${queryString}` : ''}`
+    
+    return this.request<TableDocumentsResponse>(url)
+  }
+
+  /**
+   * Get metadata schema for a table (samples documents to detect field structure)
+   * This is more efficient than fetching all documents for large tables
+   */
+  async getTableMetadataSchema(tableId: string): Promise<MetadataSchemaResponse> {
+    return this.request<MetadataSchemaResponse>(
+      `/v1/tables/${encodeURIComponent(tableId)}/schema/metadata`
     )
   }
 

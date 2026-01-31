@@ -3,9 +3,10 @@ import Editor, { loader } from '@monaco-editor/react'
 import type * as Monaco from 'monaco-editor'
 import { useHotkeys } from 'react-hotkeys-hook'
 import { Play, FloppyDisk, Clock, CircleNotch, Command } from '@phosphor-icons/react'
-import { registerRqlLanguage, RQL_LANGUAGE_ID } from '@/lib/rql-language'
+import { registerRqlLanguage, RQL_LANGUAGE_ID, updateRqlTables } from '@/lib/rql-language'
 import { useQueryStore } from '@/stores/queryStore'
 import { useConnectionStore } from '@/stores/connectionStore'
+import { useTableStore } from '@/stores/tableStore'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
 
@@ -19,8 +20,38 @@ export function QueryEditor({ onExecute }: QueryEditorProps) {
   
   const { currentQuery, setCurrentQuery, isExecuting, setIsExecuting, setResult, setError, addToHistory } = useQueryStore()
   const { activeConnectionId, connections } = useConnectionStore()
+  const { tables } = useTableStore()
   
   const activeConnection = connections.find((c) => c.id === activeConnectionId)
+
+  // Sync tables for autocompletion - runs whenever tables change
+  useEffect(() => {
+    if (tables.length === 0) {
+      return // Don't clear schema when tables aren't loaded yet
+    }
+    
+    // Convert tables to the format expected by RQL language
+    // Use actual columns from table if available, otherwise use default schema
+    const defaultColumns = [
+      { name: 'id', type: 'uuid' },
+      { name: 'title', type: 'text' },
+      { name: 'content', type: 'text' },
+      { name: 'total_nodes', type: 'integer' },
+      { name: 'tags', type: 'text[]' },
+      { name: 'metadata', type: 'jsonb' },
+      { name: 'created_at', type: 'timestamp' },
+      { name: 'updated_at', type: 'timestamp' },
+    ]
+    
+    const tableSchemas = tables.map((table) => ({
+      name: table.name,
+      fields: table.columns && table.columns.length > 0
+        ? table.columns.map(col => ({ name: col.name, type: col.type }))
+        : defaultColumns,
+    }))
+    
+    updateRqlTables(tableSchemas)
+  }, [tables])
 
   // Register RQL language on Monaco load
   const handleEditorWillMount = useCallback((monaco: typeof Monaco) => {

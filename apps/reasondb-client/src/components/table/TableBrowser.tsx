@@ -21,6 +21,7 @@ import { useConnectionStore } from '@/stores/connectionStore'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
 import { createClient, type TableSummary } from '@/lib/api'
+import { updateTableMetadataFieldsFromSchema } from '@/lib/rql-language'
 
 function getTypeIcon(type: string) {
   const lowerType = type.toLowerCase()
@@ -218,6 +219,7 @@ export function TableBrowser() {
       const response = await client.listTables()
       const storeTables = response.tables.map(apiTableToStoreTable)
       setTables(storeTables)
+      // Metadata schema fetching is handled by the separate useEffect below
     } catch (error) {
       console.error('Failed to fetch tables:', error)
       setTablesError(error instanceof Error ? error.message : 'Failed to fetch tables')
@@ -235,6 +237,35 @@ export function TableBrowser() {
       setTables([])
     }
   }, [activeConnectionId, activeConnection, fetchTables, setTables])
+
+  // Fetch metadata schema when tables are available (for autocompletion)
+  useEffect(() => {
+    if (!activeConnection || tables.length === 0) return
+
+    const fetchMetadataSchemas = async () => {
+      const client = createClient({
+        host: activeConnection.host,
+        port: activeConnection.port,
+        apiKey: activeConnection.apiKey,
+        useSsl: activeConnection.ssl,
+      })
+
+      for (const table of tables) {
+        try {
+          const schemaResponse = await client.getTableMetadataSchema(table.id)
+          if (schemaResponse.fields.length > 0) {
+            updateTableMetadataFieldsFromSchema(table.name, schemaResponse.fields)
+          }
+        } catch {
+          // Silently ignore - endpoint might not exist or table might be empty
+        }
+      }
+    }
+
+    // Small delay to let QueryEditor set base schema first
+    const timer = setTimeout(fetchMetadataSchemas, 300)
+    return () => clearTimeout(timer)
+  }, [activeConnection, tables])
 
   const filteredTables = tables.filter((t) =>
     t.name.toLowerCase().includes(searchQuery.toLowerCase())

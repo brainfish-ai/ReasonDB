@@ -2,6 +2,7 @@ import { useCallback, useEffect } from 'react'
 import { useTableStore, type Document } from '@/stores/tableStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { createClient, type TableDocumentSummary } from '@/lib/api'
+import { updateTableMetadataFieldsFromSchema } from '@/lib/rql-language'
 
 /**
  * Convert API response to document store format
@@ -37,6 +38,7 @@ export function useDocuments(tableId: string) {
     totalDocuments,
     pageSize,
     documentsError,
+    tables,
     setDocuments,
     selectDocument,
     setLoadingDocuments,
@@ -44,6 +46,7 @@ export function useDocuments(tableId: string) {
   } = useTableStore()
 
   const activeConnection = connections.find(c => c.id === activeConnectionId)
+  const currentTable = tables.find(t => t.id === tableId)
 
   const fetchDocuments = useCallback(async () => {
     if (!activeConnection || !tableId) return
@@ -63,6 +66,18 @@ export function useDocuments(tableId: string) {
       const response = await client.getTableDocuments(tableId)
       const storeDocs = response.documents.map(apiDocumentToStoreDocument)
       setDocuments(storeDocs, response.total)
+      
+      // Fetch metadata schema from server for autocompletion
+      // This is more efficient than extracting from documents client-side
+      if (currentTable) {
+        try {
+          const schemaResponse = await client.getTableMetadataSchema(tableId)
+          updateTableMetadataFieldsFromSchema(currentTable.name, schemaResponse.fields)
+        } catch (schemaError) {
+          // Schema endpoint might not exist on older servers, fail silently
+          console.warn('Failed to fetch metadata schema:', schemaError)
+        }
+      }
     } catch (error) {
       console.error('Failed to fetch documents:', error)
       setDocumentsError(error instanceof Error ? error.message : 'Failed to fetch documents')
@@ -70,7 +85,7 @@ export function useDocuments(tableId: string) {
     } finally {
       setLoadingDocuments(false)
     }
-  }, [activeConnection, tableId, setLoadingDocuments, setDocuments, setDocumentsError])
+  }, [activeConnection, tableId, currentTable, setLoadingDocuments, setDocuments, setDocumentsError])
 
   // Load documents when table is selected
   useEffect(() => {

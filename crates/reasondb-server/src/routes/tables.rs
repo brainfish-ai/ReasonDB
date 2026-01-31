@@ -452,3 +452,159 @@ pub struct TableDocumentSummary {
     #[schema(example = "2026-01-27T10:00:00Z")]
     pub created_at: String,
 }
+
+/// A metadata field with its path and inferred type
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MetadataField {
+    /// Dot-separated path to the field (e.g., "author.name")
+    #[schema(example = "author.name")]
+    pub path: String,
+
+    /// Inferred type of the field
+    #[schema(example = "text")]
+    pub field_type: String,
+
+    /// Number of documents containing this field
+    #[schema(example = 42)]
+    pub occurrence_count: usize,
+}
+
+/// Response for metadata schema endpoint
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MetadataSchemaResponse {
+    /// Table ID
+    #[schema(example = "tbl_abc123")]
+    pub table_id: String,
+
+    /// Detected metadata fields
+    pub fields: Vec<MetadataField>,
+
+    /// Number of documents sampled for schema detection
+    #[schema(example = 100)]
+    pub documents_sampled: usize,
+
+    /// Total documents in table
+    #[schema(example = 10000)]
+    pub total_documents: usize,
+}
+
+/// Extract all field paths from a JSON value recursively
+fn extract_field_paths(value: &Value, prefix: &str, paths: &mut HashMap<String, (String, usize)>, max_depth: usize) {
+    if max_depth == 0 {
+        return;
+    }
+
+    if let Value::Object(map) = value {
+        for (key, val) in map {
+            let path = if prefix.is_empty() {
+                key.clone()
+            } else {
+                format!("{}.{}", prefix, key)
+            };
+
+            // Infer type from value
+            let field_type = match val {
+                Value::Null => "null",
+                Value::Bool(_) => "boolean",
+                Value::Number(n) => {
+                    if n.is_i64() || n.is_u64() {
+                        "integer"
+                    } else {
+                        "float"
+                    }
+                }
+                Value::String(_) => "text",
+                Value::Array(_) => "array",
+                Value::Object(_) => "object",
+            };
+
+            // Update or insert the field
+            paths
+                .entry(path.clone())
+                .and_modify(|(_, count)| *count += 1)
+                .or_insert((field_type.to_string(), 1));
+
+            // Recurse into nested objects
+            if let Value::Object(_) = val {
+                extract_field_paths(val, &path, paths, max_depth - 1);
+            }
+        }
+    }
+}
+
+/// Get metadata schema for a table
+///
+/// Analyzes documents in the table to detect metadata field structure.
+/// Samples up to 100 documents for efficiency with large tables.
+#[utoipa::path(
+    get,
+    path = "/v1/tables/{id}/schema/metadata",
+    tag = "tables",
+    params(
+        ("id" = String, Path, description = "Table ID")
+    ),
+    responses(
+        (status = 200, description = "Metadata schema", body = MetadataSchemaResponse),
+        (status = 404, description = "Table not found", body = ErrorResponse),
+        (status = 500, description = "Failed to get schema", body = ErrorResponse),
+    )
+)]
+pub async fn get_table_metadata_schema<R: ReasoningEngine + Clone + Send + Sync + 'static>(
+    State(state): State<Arc<AppState<R>>>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<MetadataSchemaResponse>> {
+    // Verify table exists
+    let _ = state
+        .store
+        .get_table(&id)
+        .map_err(|e| ApiError::StorageError(e.to_string()))?
+        .ok_or_else(|| ApiError::NotFound(format!("Table not found: {}", id)))?;
+
+    let documents = state
+        .store
+        .get_documents_in_table(&id)
+        .map_err(|e| ApiError::StorageError(e.to_string()))?;
+
+    let total_documents = documents.len();
+    
+    // Sample documents for schema detection (limit to 100 for performance)
+    const SAMPLE_SIZE: usize = 100;
+    let sample_count = std::cmp::min(documents.len(), SAMPLE_SIZE);
+    let sampled_docs = &documents[..sample_count];
+
+    // Extract all unique field paths from metadata
+    let mut field_paths: HashMap<String, (String, usize)> = HashMap::new();
+    const MAX_DEPTH: usize = 5;
+
+    for doc in sampled_docs {
+        let metadata_value = serde_json::to_value(&doc.metadata)
+            .unwrap_or(Value::Object(serde_json::Map::new()));
+        extract_field_paths(&metadata_value, "", &mut field_paths, MAX_DEPTH);
+    }
+
+    // Convert to response format, sorted by path
+    let mut fields: Vec<MetadataField> = field_paths
+        .into_iter()
+        .map(|(path, (field_type, count))| MetadataField {
+            path,
+            field_type,
+            occurrence_count: count,
+        })
+        .collect();
+    
+    fields.sort_by(|a, b| a.path.cmp(&b.path));
+
+    debug!(
+        "Extracted {} metadata fields from {} documents in table {}",
+        fields.len(),
+        sample_count,
+        id
+    );
+
+    Ok(Json(MetadataSchemaResponse {
+        table_id: id,
+        fields,
+        documents_sampled: sample_count,
+        total_documents,
+    }))
+}
