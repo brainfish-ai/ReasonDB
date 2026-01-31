@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-table'
 import { FilterBuilder } from '@/components/search'
 import { JsonDetailSidebar } from '../JsonDetailSidebar'
+import { createClient } from '@/lib/api'
 
 // Hooks
 import { useDocuments, useColumnDetection, useDocumentFilter } from './hooks'
@@ -57,10 +58,53 @@ export function DocumentViewer({ tableId }: DocumentViewerProps) {
   
   const { filteredDocuments, isFiltered } = useDocumentFilter(documents)
 
+  // Load document content (tree structure)
+  const handleLoadContent = useCallback(
+    async (documentId: string, documentTitle: string) => {
+      if (!activeConnection) return
+
+      // Show loading state
+      setSelectedCell({
+        title: `${documentTitle} → content`,
+        path: 'document tree',
+        data: { loading: true },
+        isLoading: true,
+      })
+
+      try {
+        const client = createClient({
+          host: activeConnection.host,
+          port: activeConnection.port,
+          apiKey: activeConnection.apiKey,
+          useSsl: activeConnection.ssl,
+        })
+
+        const tree = await client.getDocumentTree(documentId)
+        
+        setSelectedCell({
+          title: `${documentTitle} → content`,
+          path: 'document tree',
+          data: tree,
+        })
+      } catch (error) {
+        console.error('Failed to load document tree:', error)
+        setSelectedCell({
+          title: `${documentTitle} → content`,
+          path: 'document tree',
+          data: { error: error instanceof Error ? error.message : 'Failed to load' },
+        })
+      }
+    },
+    [activeConnection]
+  )
+
   // Column definitions
   const columns = useMemo(
-    () => createColumns({ onSelectCell: setSelectedCell }),
-    []
+    () => createColumns({ 
+      onSelectCell: setSelectedCell,
+      onLoadContent: handleLoadContent,
+    }),
+    [handleLoadContent]
   )
 
   // Table instance
@@ -162,6 +206,7 @@ export function DocumentViewer({ tableId }: DocumentViewerProps) {
         title={selectedCell?.title ?? ''}
         path={selectedCell?.path}
         data={selectedCell?.data}
+        isLoading={selectedCell?.isLoading}
       />
     </div>
   )

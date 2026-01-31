@@ -1,11 +1,12 @@
 import type { ColumnDef } from '@tanstack/react-table'
-import { CaretUp, CaretDown, BracketsCurly } from '@phosphor-icons/react'
+import { CaretUp, CaretDown, BracketsCurly, TreeStructure } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
 import type { Document } from '@/stores/tableStore'
-import type { SelectedCellData } from './types'
+import type { SelectedCellData, LoadContentCallback } from './types'
 
 interface ColumnOptions {
   onSelectCell: (cell: SelectedCellData) => void
+  onLoadContent: LoadContentCallback
 }
 
 /**
@@ -33,7 +34,7 @@ function SortableHeader({
 /**
  * Create column definitions for the document table
  */
-export function createColumns({ onSelectCell }: ColumnOptions): ColumnDef<Document>[] {
+export function createColumns({ onSelectCell, onLoadContent }: ColumnOptions): ColumnDef<Document>[] {
   return [
     // ID Column
     {
@@ -57,15 +58,33 @@ export function createColumns({ onSelectCell }: ColumnOptions): ColumnDef<Docume
       ),
     },
 
-    // Nodes Column
+    // Content Column - click to view document tree
     {
-      accessorKey: 'data.total_nodes',
-      header: ({ column }) => <SortableHeader column={column} label="nodes" />,
-      cell: ({ row }) => (
-        <span className="text-peach font-mono">
-          {String(row.original.data.total_nodes ?? 0)}
-        </span>
-      ),
+      id: 'content',
+      header: 'content',
+      cell: ({ row }) => {
+        const docId = row.original.data.id as string
+        const docTitle = row.original.data.title || row.original.id
+        const totalNodes = row.original.data.total_nodes as number
+
+        return (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onLoadContent(docId, String(docTitle))
+            }}
+            className={cn(
+              'inline-flex items-center gap-1 px-1.5 rounded',
+              'bg-teal/10 hover:bg-teal/20 text-teal transition-colors',
+              'font-mono text-xs'
+            )}
+            title="Click to view document tree"
+          >
+            <TreeStructure size={11} className="shrink-0" />
+            <span>{totalNodes} nodes</span>
+          </button>
+        )
+      },
     },
 
     // Tags Column
