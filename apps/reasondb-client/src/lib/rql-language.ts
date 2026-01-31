@@ -211,8 +211,17 @@ export const rqlTheme: Monaco.editor.IStandaloneThemeData = {
   },
 }
 
+// Track if language is already registered
+let isRegistered = false
+
 // Register RQL language with Monaco
 export function registerRqlLanguage(monaco: typeof Monaco) {
+  // Prevent multiple registrations
+  if (isRegistered) {
+    return
+  }
+  isRegistered = true
+  
   // Register language
   monaco.languages.register({ id: RQL_LANGUAGE_ID })
 
