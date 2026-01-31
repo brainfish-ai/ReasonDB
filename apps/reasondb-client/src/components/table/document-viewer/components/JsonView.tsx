@@ -1,4 +1,4 @@
-import { cn } from '@/lib/utils'
+import { JsonViewer } from '@/components/shared/JsonViewer'
 import type { Document } from '@/stores/tableStore'
 
 interface JsonViewProps {
@@ -9,27 +9,16 @@ interface JsonViewProps {
 
 export function JsonView({
   documents,
-  selectedDocumentId,
-  onSelectDocument,
 }: JsonViewProps) {
+  // Transform documents to show their data
+  const data = documents.map((doc) => doc.data)
+
   return (
-    <div className="p-4 space-y-2">
-      {documents.map((doc) => (
-        <div
-          key={doc.id}
-          onClick={() => onSelectDocument(doc.id)}
-          className={cn(
-            'p-3 rounded-lg border cursor-pointer transition-colors',
-            selectedDocumentId === doc.id
-              ? 'border-mauve bg-mauve/5'
-              : 'border-border bg-surface-0/50 hover:border-overlay-0'
-          )}
-        >
-          <pre className="text-xs font-mono text-text overflow-auto max-h-48">
-            {JSON.stringify(doc.data, null, 2)}
-          </pre>
-        </div>
-      ))}
+    <div className="h-full">
+      <JsonViewer
+        data={data}
+        emptyMessage="No documents to display"
+      />
     </div>
   )
 }

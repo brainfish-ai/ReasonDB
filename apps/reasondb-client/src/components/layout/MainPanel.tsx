@@ -13,6 +13,7 @@ import { WelcomeScreen } from '@/components/common/WelcomeScreen'
 import { QueryEditor } from '@/components/query/QueryEditor'
 import { QueryResults } from '@/components/query/QueryResults'
 import { DocumentViewer } from '@/components/table/DocumentViewer'
+import { JsonViewer } from '@/components/shared/JsonViewer'
 import { useQueryStore } from '@/stores/queryStore'
 import { useTableStore } from '@/stores/tableStore'
 import { useUiStore } from '@/stores/uiStore'
@@ -250,15 +251,10 @@ export function MainPanel() {
               <div className="flex-1 min-h-0">
                 {resultView === 'table' && <QueryResults />}
                 {resultView === 'json' && (
-                  <div className="h-full overflow-auto p-4 font-mono text-xs">
-                    {result ? (
-                      <pre className="text-text">
-                        {JSON.stringify(result.rows, null, 2)}
-                      </pre>
-                    ) : (
-                      <span className="text-overlay-0">Run a query to see results</span>
-                    )}
-                  </div>
+                  <JsonViewer
+                    data={result?.rows}
+                    emptyMessage="Run a query to see results"
+                  />
                 )}
                 {resultView === 'tree' && (
                   <div className="flex items-center justify-center h-full text-overlay-0 text-sm">
