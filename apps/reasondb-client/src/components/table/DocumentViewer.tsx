@@ -23,22 +23,28 @@ import {
   ArrowsClockwise,
   DownloadSimple,
   CheckCircle,
+  BracketsCurly,
 } from '@phosphor-icons/react'
 import { useTableStore, type Document } from '@/stores/tableStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useFilterStore } from '@/stores/filterStore'
 import { Button } from '@/components/ui/Button'
 import { SearchBar, FilterBuilder } from '@/components/search'
+import { JsonDetailSidebar } from './JsonDetailSidebar'
 import { cn } from '@/lib/utils'
 import { filterDocuments } from '@/lib/filter-utils'
 import { detectColumnType, type ColumnInfo } from '@/lib/filter-types'
 import { createClient, type TableDocumentSummary } from '@/lib/api'
 
+// Selected cell data for sidebar
+interface SelectedCellData {
+  title: string
+  path: string
+  data: unknown
+}
+
 // Convert API response to document store format
 function apiDocumentToStoreDocument(apiDoc: TableDocumentSummary): Document {
-  // Spread custom metadata into the data object for display
-  const customMetadata = apiDoc.metadata || {}
-  
   return {
     id: apiDoc.id,
     data: {
@@ -46,7 +52,7 @@ function apiDocumentToStoreDocument(apiDoc: TableDocumentSummary): Document {
       title: apiDoc.title,
       total_nodes: apiDoc.total_nodes,
       tags: apiDoc.tags,
-      ...customMetadata, // Include custom metadata fields
+      metadata: apiDoc.metadata || {}, // Keep metadata as a single object
       created_at: apiDoc.created_at,
     },
     metadata: {
@@ -87,6 +93,7 @@ export function DocumentViewer({ tableId }: DocumentViewerProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('table')
   const [sorting, setSorting] = useState<SortingState>([])
   const [copied, setCopied] = useState(false)
+  const [selectedCell, setSelectedCell] = useState<SelectedCellData | null>(null)
 
   // Get active connection details
   const activeConnection = connections.find(c => c.id === activeConnectionId)
@@ -127,35 +134,67 @@ export function DocumentViewer({ tableId }: DocumentViewerProps) {
     }
   }, [tableId, activeConnection, fetchDocuments])
 
-  // Detect columns from documents
+  // Detect columns from documents (for filter/search functionality)
   const detectedColumns = useMemo<ColumnInfo[]>(() => {
     if (documents.length === 0) return []
     
-    const sampleDoc = documents[0]
-    const cols: ColumnInfo[] = []
+    const cols: ColumnInfo[] = [
+      { name: 'id', type: 'text', path: 'data.id' },
+      { name: 'title', type: 'text', path: 'data.title' },
+      { name: 'total_nodes', type: 'number', path: 'data.total_nodes' },
+      { name: 'tags', type: 'array', path: 'data.tags' },
+      { name: 'created_at', type: 'date', path: 'data.created_at' },
+    ]
     
-    // Extract columns from data object
-    const extractColumns = (obj: Record<string, unknown>, prefix: string) => {
-      Object.entries(obj).forEach(([key, value]) => {
-        const path = prefix ? `${prefix}.${key}` : key
-        const type = detectColumnType(value)
-        
-        cols.push({ name: key, type, path })
-        
-        // Recursively extract nested object columns (one level)
-        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-          Object.entries(value as Record<string, unknown>).forEach(([nestedKey, nestedValue]) => {
-            cols.push({
-              name: `${key}.${nestedKey}`,
-              type: detectColumnType(nestedValue),
-              path: `${path}.${nestedKey}`,
-            })
+    // Extract metadata columns from all documents for filtering
+    const metadataKeys = new Set<string>()
+    documents.forEach(doc => {
+      const metadata = doc.data.metadata as Record<string, unknown> | undefined
+      if (metadata) {
+        // Recursively extract nested keys with dot notation
+        const extractKeys = (obj: Record<string, unknown>, prefix: string) => {
+          Object.entries(obj).forEach(([key, value]) => {
+            const path = prefix ? `${prefix}.${key}` : key
+            metadataKeys.add(path)
+            if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+              extractKeys(value as Record<string, unknown>, path)
+            }
           })
         }
-      })
-    }
+        extractKeys(metadata, 'metadata')
+      }
+    })
     
-    extractColumns(sampleDoc.data, 'data')
+    // Add metadata columns with detected types
+    metadataKeys.forEach(key => {
+      // Get sample value to detect type
+      let sampleValue: unknown = undefined
+      for (const doc of documents) {
+        const metadata = doc.data.metadata as Record<string, unknown> | undefined
+        if (metadata) {
+          const parts = key.replace('metadata.', '').split('.')
+          let current: unknown = metadata
+          for (const part of parts) {
+            if (current && typeof current === 'object') {
+              current = (current as Record<string, unknown>)[part]
+            } else {
+              current = undefined
+              break
+            }
+          }
+          if (current !== undefined) {
+            sampleValue = current
+            break
+          }
+        }
+      }
+      
+      cols.push({
+        name: key,
+        type: detectColumnType(sampleValue),
+        path: `data.${key}`,
+      })
+    })
     
     return cols
   }, [documents])
@@ -190,47 +229,129 @@ export function DocumentViewer({ tableId }: DocumentViewerProps) {
   const columns = useMemo<ColumnDef<Document>[]>(() => {
     if (documents.length === 0) return []
     
-    // Standard fields in preferred order
-    const standardFields = ['id', 'title', 'total_nodes', 'tags', 'created_at']
-    
-    // Collect all unique keys from all documents
-    const allKeys = new Set<string>()
-    documents.forEach(doc => {
-      Object.keys(doc.data).forEach(key => allKeys.add(key))
-    })
-    
-    // Sort keys: standard fields first (in order), then custom metadata fields alphabetically
-    const sortedKeys = Array.from(allKeys).sort((a, b) => {
-      const aIndex = standardFields.indexOf(a)
-      const bIndex = standardFields.indexOf(b)
-      
-      // Both are standard fields - sort by their standard order
-      if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex
-      // Only a is standard - it comes first
-      if (aIndex !== -1) return -1
-      // Only b is standard - it comes first
-      if (bIndex !== -1) return 1
-      // Both are custom - sort alphabetically
-      return a.localeCompare(b)
-    })
-    
-    return sortedKeys.map((key) => ({
-      accessorKey: `data.${key}`,
-      header: ({ column }) => (
-        <button
-          className="flex items-center gap-1 hover:text-text transition-colors font-medium"
-          onClick={() => column.toggleSorting()}
-        >
-          {key}
-          {column.getIsSorted() === 'asc' && <CaretUp size={12} weight="bold" />}
-          {column.getIsSorted() === 'desc' && <CaretDown size={12} weight="bold" />}
-        </button>
-      ),
-      cell: ({ row }) => {
-        const value = row.original.data[key]
-        return <CellRenderer value={value} />
+    // Fixed columns: standard fields + metadata as expandable
+    const columnDefs: ColumnDef<Document>[] = [
+      {
+        accessorKey: 'data.id',
+        header: ({ column }) => (
+          <button
+            className="flex items-center gap-1 hover:text-text transition-colors font-medium"
+            onClick={() => column.toggleSorting()}
+          >
+            id
+            {column.getIsSorted() === 'asc' && <CaretUp size={12} weight="bold" />}
+            {column.getIsSorted() === 'desc' && <CaretDown size={12} weight="bold" />}
+          </button>
+        ),
+        cell: ({ row }) => (
+          <span className="font-mono text-xs text-overlay-1">{String(row.original.data.id)}</span>
+        ),
       },
-    }))
+      {
+        accessorKey: 'data.title',
+        header: ({ column }) => (
+          <button
+            className="flex items-center gap-1 hover:text-text transition-colors font-medium"
+            onClick={() => column.toggleSorting()}
+          >
+            title
+            {column.getIsSorted() === 'asc' && <CaretUp size={12} weight="bold" />}
+            {column.getIsSorted() === 'desc' && <CaretDown size={12} weight="bold" />}
+          </button>
+        ),
+        cell: ({ row }) => (
+          <span className="font-medium text-text">{String(row.original.data.title || '')}</span>
+        ),
+      },
+      {
+        accessorKey: 'data.total_nodes',
+        header: ({ column }) => (
+          <button
+            className="flex items-center gap-1 hover:text-text transition-colors font-medium"
+            onClick={() => column.toggleSorting()}
+          >
+            nodes
+            {column.getIsSorted() === 'asc' && <CaretUp size={12} weight="bold" />}
+            {column.getIsSorted() === 'desc' && <CaretDown size={12} weight="bold" />}
+          </button>
+        ),
+        cell: ({ row }) => (
+          <span className="text-peach font-mono">{String(row.original.data.total_nodes ?? 0)}</span>
+        ),
+      },
+      {
+        accessorKey: 'data.tags',
+        header: 'tags',
+        cell: ({ row }) => {
+          const tags = row.original.data.tags as string[] | undefined
+          if (!tags || tags.length === 0) return <span className="text-overlay-0 italic">—</span>
+          const displayTags = tags.slice(0, 3)
+          const remaining = tags.length - 3
+          return (
+            <span className="text-blue font-mono text-xs">
+              {displayTags.join(', ')}{remaining > 0 ? ` +${remaining}` : ''}
+            </span>
+          )
+        },
+      },
+      {
+        accessorKey: 'data.metadata',
+        header: 'metadata',
+        cell: ({ row }) => {
+          const metadata = row.original.data.metadata as Record<string, unknown> | undefined
+          const docTitle = row.original.data.title || row.original.id
+          
+          if (!metadata || Object.keys(metadata).length === 0) {
+            return <span className="text-overlay-0 italic">—</span>
+          }
+          
+          const keys = Object.keys(metadata)
+          const preview = keys.slice(0, 2).join(', ')
+          const hasMore = keys.length > 2
+          
+          return (
+            <button
+              onClick={() => setSelectedCell({
+                title: `${docTitle} → metadata`,
+                path: 'metadata',
+                data: metadata,
+              })}
+              className={cn(
+                'inline-flex items-center gap-1 px-1.5 rounded',
+                'bg-mauve/10 hover:bg-mauve/20 text-mauve transition-colors',
+                'font-mono text-xs'
+              )}
+              title="Click to view metadata"
+            >
+              <BracketsCurly size={11} className="shrink-0" />
+              <span className="truncate max-w-[120px]">
+                {preview}{hasMore ? ` +${keys.length - 2}` : ''}
+              </span>
+            </button>
+          )
+        },
+      },
+      {
+        accessorKey: 'data.created_at',
+        header: ({ column }) => (
+          <button
+            className="flex items-center gap-1 hover:text-text transition-colors font-medium"
+            onClick={() => column.toggleSorting()}
+          >
+            created
+            {column.getIsSorted() === 'asc' && <CaretUp size={12} weight="bold" />}
+            {column.getIsSorted() === 'desc' && <CaretDown size={12} weight="bold" />}
+          </button>
+        ),
+        cell: ({ row }) => {
+          const date = row.original.data.created_at
+          if (!date) return <span className="text-overlay-0 italic">—</span>
+          return <span className="text-sky text-sm">{new Date(date as string).toLocaleDateString()}</span>
+        },
+      },
+    ]
+    
+    return columnDefs
   }, [documents])
 
   const table = useReactTable({
@@ -284,9 +405,11 @@ export function DocumentViewer({ tableId }: DocumentViewerProps) {
   }
 
   return (
-    <div className="flex flex-col h-full bg-base">
-      {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-border bg-mantle">
+    <div className="flex h-full bg-base">
+      {/* Main content area */}
+      <div className="flex flex-col flex-1 min-w-0">
+        {/* Toolbar */}
+        <div className="flex items-center gap-3 px-4 py-2 border-b border-border bg-mantle">
         {/* Table icon */}
         <div className="flex items-center gap-2 shrink-0">
           <Table size={18} weight="duotone" className="text-mauve" />
@@ -521,67 +644,18 @@ export function DocumentViewer({ tableId }: DocumentViewerProps) {
           )}
         </div>
       )}
+      </div>
+
+      {/* JSON Detail Sidebar */}
+      {selectedCell && (
+        <JsonDetailSidebar
+          isOpen={selectedCell !== null}
+          onClose={() => setSelectedCell(null)}
+          title={selectedCell.title}
+          path={selectedCell.path}
+          data={selectedCell.data}
+        />
+      )}
     </div>
   )
-}
-
-function CellRenderer({ value }: { value: unknown }) {
-  if (value === null) return <span className="text-overlay-0 italic">null</span>
-  if (value === undefined) return <span className="text-overlay-0 italic">—</span>
-  
-  if (typeof value === 'boolean') {
-    return <span className={value ? 'text-green' : 'text-red'}>{String(value)}</span>
-  }
-  
-  if (typeof value === 'number') {
-    return <span className="text-peach font-mono">{value}</span>
-  }
-  
-  if (Array.isArray(value)) {
-    if (value.length === 0) return <span className="text-overlay-0 italic">[]</span>
-    const str = value.join(', ')
-    if (str.length > 50) {
-      return (
-        <span className="text-blue font-mono text-xs" title={str}>
-          [{str.slice(0, 50)}...]
-        </span>
-      )
-    }
-    return <span className="text-blue font-mono text-xs">[{str}]</span>
-  }
-  
-  if (typeof value === 'object') {
-    const str = JSON.stringify(value)
-    if (str.length > 50) {
-      return (
-        <span className="text-blue font-mono text-xs" title={str}>
-          {str.slice(0, 50)}...
-        </span>
-      )
-    }
-    return <span className="text-blue font-mono text-xs">{str}</span>
-  }
-  
-  const strValue = String(value)
-  
-  // Check if it's a date
-  if (strValue.match(/^\d{4}-\d{2}-\d{2}/)) {
-    return <span className="text-sky">{new Date(strValue).toLocaleString()}</span>
-  }
-  
-  // Check if it's a vector representation
-  if (strValue.startsWith('[') && strValue.includes('...')) {
-    return <span className="text-teal font-mono text-xs">{strValue}</span>
-  }
-  
-  // Truncate long strings
-  if (strValue.length > 100) {
-    return (
-      <span className="block max-w-[300px] truncate" title={strValue}>
-        {strValue}
-      </span>
-    )
-  }
-  
-  return <span>{strValue}</span>
 }
