@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -60,19 +60,40 @@ const DEFAULT_GROUPS = ['Production', 'Development', 'Staging', 'Local']
 export function ConnectionForm({ open, onOpenChange, editConnection }: ConnectionFormProps) {
   const { addConnection, updateConnection, deleteConnection } = useConnectionStore()
   
-  const [formData, setFormData] = useState<FormData>(() => ({
-    name: editConnection?.name ?? '',
-    host: editConnection?.host ?? 'localhost',
-    port: editConnection?.port?.toString() ?? '4444',
-    apiKey: editConnection?.apiKey ?? '',
-    ssl: editConnection?.ssl ?? false,
-    color: editConnection?.color ?? COLORS[0].value,
-    group: editConnection?.group ?? '',
-  }))
+  const [formData, setFormData] = useState<FormData>({
+    name: '',
+    host: 'localhost',
+    port: '4444',
+    apiKey: '',
+    ssl: false,
+    color: COLORS[0].value,
+    group: '',
+  })
   
   const [errors, setErrors] = useState<FormErrors>({})
   const [isTesting, setIsTesting] = useState(false)
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null)
+  const [testMessage, setTestMessage] = useState<string>('')
+  const [serverVersion, setServerVersion] = useState<string>('')
+
+  // Reset form when dialog opens or editConnection changes
+  useEffect(() => {
+    if (open) {
+      setFormData({
+        name: editConnection?.name ?? '',
+        host: editConnection?.host ?? 'localhost',
+        port: editConnection?.port?.toString() ?? '4444',
+        apiKey: editConnection?.apiKey ?? '',
+        ssl: editConnection?.ssl ?? false,
+        color: editConnection?.color ?? COLORS[0].value,
+        group: editConnection?.group ?? '',
+      })
+      setErrors({})
+      setTestResult(null)
+      setTestMessage('')
+      setServerVersion('')
+    }
+  }, [open, editConnection])
 
   const validateForm = useCallback((): boolean => {
     const newErrors: FormErrors = {}
@@ -97,9 +118,6 @@ export function ConnectionForm({ open, onOpenChange, editConnection }: Connectio
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }, [formData])
-
-  const [testMessage, setTestMessage] = useState<string>('')
-  const [serverVersion, setServerVersion] = useState<string>('')
 
   const handleTestConnection = async () => {
     if (!validateForm()) return
