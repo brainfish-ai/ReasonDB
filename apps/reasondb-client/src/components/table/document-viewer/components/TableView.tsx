@@ -1,6 +1,6 @@
-import { flexRender, type Table as TableType } from '@tanstack/react-table'
+import { type Table as TableType } from '@tanstack/react-table'
 import { Copy, PencilSimple, Trash, CheckCircle } from '@phosphor-icons/react'
-import { cn } from '@/lib/utils'
+import { DataTable } from '@/components/shared/data-table'
 import type { Document } from '@/stores/tableStore'
 
 interface TableViewProps {
@@ -19,58 +19,19 @@ export function TableView({
   onCopyDocument,
 }: TableViewProps) {
   return (
-    <table className="w-full text-sm">
-      <thead className="sticky top-0 bg-mantle border-b border-border z-10">
-        {table.getHeaderGroups().map((headerGroup) => (
-          <tr key={headerGroup.id}>
-            {headerGroup.headers.map((header) => (
-              <th
-                key={header.id}
-                className="px-4 py-3 text-left text-xs font-medium text-subtext-0"
-              >
-                {header.isPlaceholder
-                  ? null
-                  : flexRender(header.column.columnDef.header, header.getContext())}
-              </th>
-            ))}
-            <th className="px-4 py-3 w-24 text-right text-xs font-medium text-subtext-0">
-              Actions
-            </th>
-          </tr>
-        ))}
-      </thead>
-      <tbody>
-        {table.getRowModel().rows.map((row, idx) => (
-          <tr
-            key={row.id}
-            onClick={() => onSelectDocument(row.original.id)}
-            className={cn(
-              'border-b border-border/50 cursor-pointer transition-colors group',
-              selectedDocumentId === row.original.id
-                ? 'bg-mauve/10'
-                : idx % 2 === 0
-                ? 'bg-base hover:bg-surface-0/50'
-                : 'bg-mantle/30 hover:bg-surface-0/50'
-            )}
-          >
-            {row.getVisibleCells().map((cell) => (
-              <td key={cell.id} className="px-4 py-2 max-w-[200px]">
-                <div className="truncate">
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                </div>
-              </td>
-            ))}
-            <td className="px-4 py-2">
-              <RowActions
-                row={row.original}
-                copied={copied}
-                onCopy={onCopyDocument}
-              />
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <DataTable
+      table={table}
+      onRowClick={(row) => onSelectDocument(row.id)}
+      getRowId={(row) => row.id}
+      selectedRowId={selectedDocumentId}
+      renderRowActions={(row) => (
+        <RowActions
+          row={row}
+          copied={copied}
+          onCopy={onCopyDocument}
+        />
+      )}
+    />
   )
 }
 

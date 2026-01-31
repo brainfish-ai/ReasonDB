@@ -168,7 +168,7 @@ export function QueryEditor({ onExecute, initialQuery, onQueryChange }: QueryEdi
           <Button
             size="sm"
             onClick={handleExecute}
-            disabled={isExecuting || !activeConnectionId || !currentQuery.trim()}
+            disabled={isExecuting || !activeConnectionId || !query.trim()}
             className="gap-2 pr-3"
             title="Execute query (⌘+Enter)"
           >
@@ -185,7 +185,7 @@ export function QueryEditor({ onExecute, initialQuery, onQueryChange }: QueryEdi
           <Button
             size="sm"
             variant="ghost"
-            disabled={!currentQuery.trim()}
+            disabled={!query.trim()}
             className="gap-2"
             title="Save query"
           >
