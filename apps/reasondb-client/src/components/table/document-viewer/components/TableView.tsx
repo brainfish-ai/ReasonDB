@@ -26,14 +26,14 @@ export function TableView({
             {headerGroup.headers.map((header) => (
               <th
                 key={header.id}
-                className="px-4 py-3 text-left text-xs font-medium text-subtext-0 uppercase tracking-wide"
+                className="px-4 py-3 text-left text-xs font-medium text-subtext-0"
               >
                 {header.isPlaceholder
                   ? null
                   : flexRender(header.column.columnDef.header, header.getContext())}
               </th>
             ))}
-            <th className="px-4 py-3 w-24 text-right text-xs font-medium text-subtext-0 uppercase tracking-wide">
+            <th className="px-4 py-3 w-24 text-right text-xs font-medium text-subtext-0">
               Actions
             </th>
           </tr>

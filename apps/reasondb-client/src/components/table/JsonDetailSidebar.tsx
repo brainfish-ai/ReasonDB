@@ -100,16 +100,20 @@ interface JsonDetailSidebarProps {
   title: string
   data: unknown
   path?: string // The path to the data (e.g., "metadata.employee")
+  isLoading?: boolean
 }
 
-export function JsonDetailSidebar({ isOpen, onClose, title, data, path }: JsonDetailSidebarProps) {
+export function JsonDetailSidebar({ isOpen, onClose, title, data, path, isLoading }: JsonDetailSidebarProps) {
   const [copied, setCopied] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
   const [isVisible, setIsVisible] = useState(false)
   const editorRef = useRef<unknown>(null)
 
+  // Check if data indicates loading
+  const showLoading = isLoading || (data && typeof data === 'object' && 'loading' in (data as Record<string, unknown>))
+
   // Format JSON with proper indentation
-  const formattedJson = JSON.stringify(data, null, 2)
+  const formattedJson = showLoading ? '' : JSON.stringify(data, null, 2)
 
   // Handle open/close animation
   useEffect(() => {
@@ -230,74 +234,85 @@ export function JsonDetailSidebar({ isOpen, onClose, title, data, path }: JsonDe
         </div>
 
         {/* Type info */}
-        <div className="px-4 py-2 border-b border-border bg-surface-0/20">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-overlay-0">Type:</span>
-            <span className={cn(
-              'px-1.5 py-0.5 rounded font-mono',
-              Array.isArray(data) ? 'bg-blue/20 text-blue' :
-              typeof data === 'object' ? 'bg-mauve/20 text-mauve' :
-              typeof data === 'string' ? 'bg-green/20 text-green' :
-              typeof data === 'number' ? 'bg-peach/20 text-peach' :
-              'bg-overlay-0/20 text-overlay-1'
-            )}>
-              {Array.isArray(data) ? `array[${data.length}]` : typeof data}
-            </span>
-            {typeof data === 'object' && data !== null && !Array.isArray(data) && (
-              <>
-                <span className="text-overlay-0">•</span>
-                <span className="text-overlay-0">
-                  {Object.keys(data).length} keys
-                </span>
-              </>
-            )}
+        {!showLoading && (
+          <div className="px-4 py-2 border-b border-border bg-surface-0/20">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-overlay-0">Type:</span>
+              <span className={cn(
+                'px-1.5 py-0.5 rounded font-mono',
+                Array.isArray(data) ? 'bg-blue/20 text-blue' :
+                typeof data === 'object' ? 'bg-mauve/20 text-mauve' :
+                typeof data === 'string' ? 'bg-green/20 text-green' :
+                typeof data === 'number' ? 'bg-peach/20 text-peach' :
+                'bg-overlay-0/20 text-overlay-1'
+              )}>
+                {Array.isArray(data) ? `array[${data.length}]` : typeof data}
+              </span>
+              {typeof data === 'object' && data !== null && !Array.isArray(data) && (
+                <>
+                  <span className="text-overlay-0">•</span>
+                  <span className="text-overlay-0">
+                    {Object.keys(data).length} keys
+                  </span>
+                </>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Monaco Editor */}
+        {/* Monaco Editor or Loading State */}
         <div className="flex-1 min-h-0">
-          <Editor
-            height="100%"
-            language="json"
-            value={formattedJson}
-            onMount={handleEditorDidMount}
-            options={{
-              readOnly: true,
-              minimap: { enabled: false },
-              fontSize: 13,
-              fontFamily: 'JetBrains Mono, Menlo, Monaco, monospace',
-              lineNumbers: 'on',
-              scrollBeyondLastLine: false,
-              automaticLayout: true,
-              wordWrap: 'on',
-              folding: true,
-              foldingStrategy: 'indentation',
-              showFoldingControls: 'always',
-              bracketPairColorization: { enabled: true },
-              guides: {
-                bracketPairs: true,
-                indentation: true,
-              },
-              renderLineHighlight: 'line',
-              scrollbar: {
-                vertical: 'auto',
-                horizontal: 'auto',
-                verticalScrollbarSize: 10,
-                horizontalScrollbarSize: 10,
-              },
-              padding: { top: 12, bottom: 12 },
-            }}
-            theme="catppuccin-mocha"
-          />
+          {showLoading ? (
+            <div className="flex flex-col items-center justify-center h-full gap-3">
+              <div className="w-8 h-8 border-2 border-mauve border-t-transparent rounded-full animate-spin" />
+              <span className="text-sm text-overlay-1">Loading content...</span>
+            </div>
+          ) : (
+            <Editor
+              height="100%"
+              language="json"
+              value={formattedJson}
+              onMount={handleEditorDidMount}
+              options={{
+                readOnly: true,
+                minimap: { enabled: false },
+                fontSize: 13,
+                fontFamily: 'JetBrains Mono, Menlo, Monaco, monospace',
+                lineNumbers: 'on',
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+                wordWrap: 'on',
+                folding: true,
+                foldingStrategy: 'indentation',
+                showFoldingControls: 'always',
+                bracketPairColorization: { enabled: true },
+                guides: {
+                  bracketPairs: true,
+                  indentation: true,
+                },
+                renderLineHighlight: 'line',
+                scrollbar: {
+                  vertical: 'auto',
+                  horizontal: 'auto',
+                  verticalScrollbarSize: 10,
+                  horizontalScrollbarSize: 10,
+                },
+                padding: { top: 12, bottom: 12 },
+              }}
+              theme="catppuccin-mocha"
+            />
+          )}
         </div>
 
         {/* Footer with quick stats */}
-        <div className="px-4 py-2 border-t border-border bg-surface-0/20">
-          <div className="flex items-center justify-between text-xs text-overlay-0">
-            <span>{formattedJson.split('\n').length} lines</span>
-            <span>{new Blob([formattedJson]).size} bytes</span>
+        {!showLoading && (
+          <div className="px-4 py-2 border-t border-border bg-surface-0/20">
+            <div className="flex items-center justify-between text-xs text-overlay-0">
+              <span>{formattedJson.split('\n').length} lines</span>
+              <span>{new Blob([formattedJson]).size} bytes</span>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </>
   )

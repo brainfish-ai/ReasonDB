@@ -5,6 +5,7 @@ export interface SelectedCellData {
   title: string
   path: string
   data: unknown
+  isLoading?: boolean
 }
 
 // View modes
@@ -14,6 +15,9 @@ export type ViewMode = 'table' | 'json'
 export interface DocumentViewerProps {
   tableId: string
 }
+
+// Callback for loading document content
+export type LoadContentCallback = (documentId: string, documentTitle: string) => void
 
 // Re-export Document type
 export type { Document }
