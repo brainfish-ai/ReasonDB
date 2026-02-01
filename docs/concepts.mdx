@@ -1,192 +1,269 @@
 ---
 title: Core Concepts
-description: Understand the key concepts behind ReasonDB's reasoning-native architecture
+description: The architecture that makes AI actually understand your documents
 ---
 
-ReasonDB uses a fundamentally different approach to document storage and retrieval. Instead of embedding documents into vectors or storing them as flat text, ReasonDB builds **hierarchical trees** that an LLM can navigate intelligently.
+ReasonDB isn't an incremental improvement—it's a fundamental rethinking of how databases should work in the AI era. This page explains the core concepts that make intelligent document retrieval possible.
 
-## Documents and Trees
+## The Key Insight
 
-When you ingest a document into ReasonDB, it's transformed into a tree structure:
+**Documents have structure. That structure has meaning. Losing it is losing intelligence.**
+
+When you read a legal contract, you don't scan every word hoping to stumble upon the termination clause. You look at the table of contents, navigate to the relevant section, and drill down. ReasonDB gives AI the same capability.
+
+<Info>
+**Hierarchical Reasoning Retrieval (HRR)** is ReasonDB's core innovation: preserving document structure and using LLMs to navigate it intelligently, rather than embedding everything into a flat vector space.
+</Info>
+
+## Documents Become Trees
+
+When you ingest a document, ReasonDB transforms it into a navigable tree:
 
 <Mermaid>
 {`graph TD
-    Root[Document Root]
-
-    Root --> A[Chapter 1: Introduction]
-    Root --> B[Chapter 2: Supervised Learning]
-    Root --> C[Chapter 3: Neural Networks]
-
-    B --> B1[Section 2.1: Classification]
-    B --> B2[Section 2.2: Regression]
-
-    C --> C1[Section 3.1: Perceptrons]
-    C --> C2[Section 3.2: Backpropagation]`}
+    Root["📄 Service Agreement"]
+    
+    Root --> A["1. Definitions"]
+    Root --> B["2. Services"]
+    Root --> C["3. Payment Terms"]
+    Root --> D["4. Termination"]
+    
+    C --> C1["3.1 Fees"]
+    C --> C2["3.2 Payment Schedule"]
+    C --> C3["3.3 Late Penalties"]
+    
+    D --> D1["4.1 Termination for Cause"]
+    D --> D2["4.2 Termination for Convenience"]
+    D --> D3["4.3 Effect of Termination"]
+    
+    style Root fill:#1e1e2e,stroke:#89b4fa,color:#cdd6f4
+    style C fill:#1e1e2e,stroke:#a6e3a1,color:#cdd6f4
+    style D fill:#1e1e2e,stroke:#a6e3a1,color:#cdd6f4`}
 </Mermaid>
 
-Each node in the tree contains:
-- **Title**: The heading or section name
-- **Content**: The actual text content
-- **Summary**: An LLM-generated summary for navigation
-- **Children**: Links to child nodes
+**Why trees?**
+- They mirror how documents are actually organized
+- Each level provides increasing specificity
+- Navigation is intuitive for both humans and AI
+- Context is preserved at every level
 
-## Nodes
+## Nodes: The Building Blocks
 
-A **node** is the fundamental unit in ReasonDB. Every piece of content lives in a node.
+Every piece of content in ReasonDB lives in a **node**. Nodes are the atomic units of knowledge.
 
-| Property | Description |
-|----------|-------------|
-| `id` | Unique identifier (e.g., `node_xyz789`) |
-| `title` | Node title from document structure |
-| `content` | The actual text content |
-| `summary` | LLM-generated summary for search navigation |
-| `depth` | Level in the tree (0 = root) |
-| `children_ids` | IDs of child nodes |
-| `parent_id` | ID of parent node (null for root) |
+| Property | Purpose | Example |
+|----------|---------|---------|
+| `id` | Unique identifier | `node_7f3a9b2c` |
+| `title` | Section heading | "3.2 Payment Schedule" |
+| `content` | Actual text | "Payments are due within 30 days..." |
+| `summary` | LLM-generated navigation aid | "Specifies payment timing, grace periods, and invoicing requirements" |
+| `depth` | Level in tree (0 = root) | `2` |
+| `children` | Child node IDs | `["node_abc", "node_def"]` |
+| `parent` | Parent node ID | `"node_xyz"` |
 
 ### Leaf vs Branch Nodes
 
-- **Leaf nodes** have no children and contain the actual content
-- **Branch nodes** have children and typically contain section overviews
+<CardGroup cols={2}>
+  <Card title="Branch Nodes" icon="folder">
+    Have children. Contain section overviews and summaries. Used for navigation decisions.
+  </Card>
+  <Card title="Leaf Nodes" icon="file">
+    No children. Contain the actual detailed content. Where answers are extracted.
+  </Card>
+</CardGroup>
 
-## Tables
+**The summary is crucial.** When the LLM navigates the tree, it reads summaries to decide which branches are worth exploring. A good summary captures what questions this section can answer.
 
-**Tables** are collections that organize documents. Think of them like folders or databases:
+## LLM-Guided Traversal
 
-```bash
-# Create a table for legal documents
-curl -X POST http://localhost:4444/v1/tables \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Legal Contracts", "metadata": {"department": "legal"}}'
-```
+This is where ReasonDB diverges from every other approach. Instead of retrieving then reasoning, ReasonDB **reasons to retrieve**.
 
-Tables help you:
-- Organize documents by topic or department
-- Scope searches to specific collections
-- Apply different retention policies
-- Track document counts and statistics
-
-## LLM-Guided Search
-
-The core innovation of ReasonDB is how it searches. Instead of vector similarity, ReasonDB uses an LLM to **reason through the tree structure**.
-
-### How It Works
+### The Traversal Process
 
 <Mermaid>
 {`sequenceDiagram
     participant User
-    participant API
+    participant ReasonDB
     participant LLM
     participant Tree
-
-    User->>API: "What is backpropagation?"
-    API->>Tree: Get root node summaries
-    API->>LLM: Which branch is relevant?
-    LLM-->>API: "Chapter 3: Neural Networks" (0.9 confidence)
-    API->>Tree: Get Chapter 3 children
-    API->>LLM: Which section is relevant?
-    LLM-->>API: "Section 3.2: Backpropagation" (0.95 confidence)
-    API->>Tree: Get leaf content
-    API->>LLM: Extract answer from content
-    LLM-->>API: "Backpropagation is..."
-    API-->>User: Answer + confidence + path`}
+    
+    User->>ReasonDB: "What are the late payment penalties?"
+    
+    ReasonDB->>Tree: Get root children summaries
+    ReasonDB->>LLM: Which sections might answer this?
+    LLM-->>ReasonDB: "Payment Terms" (0.92), "Termination" (0.31)
+    
+    Note over ReasonDB: Prune low-confidence branches
+    
+    ReasonDB->>Tree: Get "Payment Terms" children
+    ReasonDB->>LLM: Which subsection is most relevant?
+    LLM-->>ReasonDB: "Late Penalties" (0.97)
+    
+    ReasonDB->>Tree: Get leaf content
+    ReasonDB->>LLM: Extract answer from content
+    LLM-->>ReasonDB: "Late payments incur 1.5% monthly interest..."
+    
+    ReasonDB-->>User: Answer + confidence + path`}
 </Mermaid>
 
-### Beam Search
+### Why This Works Better
 
-ReasonDB uses **beam search** to explore multiple paths in parallel:
+| Vector Search | ReasonDB Traversal |
+|---------------|-------------------|
+| Embeds query and chunks into same space | LLM reasons about relevance in natural language |
+| "Similar" vectors might be irrelevant | LLM understands semantic intent |
+| Loses document structure | Preserves and leverages structure |
+| Same approach for all queries | Adapts depth based on query complexity |
+| Black box retrieval | Explainable navigation path |
 
-- **Beam Width**: How many branches to explore simultaneously (default: 3)
-- **Max Depth**: Maximum tree depth to traverse (default: 10)
-- **Min Confidence**: Threshold to prune low-confidence branches (default: 0.3)
+## Beam Search: Parallel Exploration
+
+Real questions sometimes have answers in multiple places, or the best path isn't obvious upfront. ReasonDB uses **beam search** to explore multiple promising branches simultaneously.
+
+```
+Query: "What happens if I miss a payment?"
+
+Beam Width: 3
+
+Level 1 - Evaluate all sections:
+  → "Payment Terms" (0.88) ✓ Keep
+  → "Termination" (0.72) ✓ Keep  
+  → "Definitions" (0.15) ✗ Prune
+  → "Services" (0.08) ✗ Prune
+
+Level 2 - Explore top 3 branches in parallel:
+  → Payment Terms → Late Penalties (0.94) ✓
+  → Payment Terms → Payment Schedule (0.45) ✓
+  → Termination → Termination for Cause (0.68) ✓
+
+Level 3 - Continue to leaves, extract answers
+```
+
+### Tuning Beam Search
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `beam_width` | 3 | More branches = more thorough, slower |
+| `max_depth` | 10 | Deeper traversal for complex documents |
+| `min_confidence` | 0.3 | Prune branches below this threshold |
 
 ```bash
 curl -X POST http://localhost:4444/v1/search \
-  -H "Content-Type: application/json" \
   -d '{
-    "query": "What are the advantages of neural networks?",
+    "query": "What are all the ways the contract can end?",
     "beam_width": 5,
-    "max_depth": 8,
-    "min_confidence": 0.4
+    "min_confidence": 0.25
   }'
 ```
 
-### Why This Matters
+<Tip>
+Increase `beam_width` for exploratory questions where answers might be scattered. Decrease for specific factual queries.
+</Tip>
 
-| Vector Search | ReasonDB Search |
-|---------------|-----------------|
-| Finds "similar" text | Finds "relevant" content |
-| Loses document structure | Preserves hierarchy |
-| One-shot retrieval | Iterative reasoning |
-| No explanation | Shows traversal path |
-| Same quality for all queries | Adapts to query complexity |
+## Tables: Organizing Knowledge
+
+**Tables** are collections of documents. Think of them as namespaces or folders for your knowledge base.
+
+```bash
+# Create topical collections
+curl -X POST http://localhost:4444/v1/tables \
+  -d '{"name": "Legal Contracts", "metadata": {"department": "legal"}}'
+
+curl -X POST http://localhost:4444/v1/tables \
+  -d '{"name": "Technical Docs", "metadata": {"department": "engineering"}}'
+```
+
+**Why tables matter:**
+- Scope searches to relevant collections
+- Different retention and access policies
+- Track document counts and usage
+- Organize by department, project, or topic
 
 ## Search vs Query
 
-ReasonDB offers two ways to find documents:
+ReasonDB offers two complementary interfaces:
 
-### Search Endpoint (`/v1/search`)
+### `/v1/search` — LLM-Guided Retrieval
 
-LLM-guided tree traversal for complex questions:
+For natural language questions requiring reasoning:
 
 ```bash
 curl -X POST http://localhost:4444/v1/search \
-  -d '{"query": "Explain how neural networks learn"}'
+  -d '{"query": "What happens to intellectual property if the contract is terminated?"}'
 ```
 
-Best for:
-- Natural language questions
-- Complex reasoning
-- Answer extraction
-- Understanding context
+**Best for:** Complex questions, answer extraction, reasoning across sections
 
-### Query Endpoint (`/v1/query`)
+### `/v1/query` — RQL Structured Queries
 
-SQL-like RQL queries for filtering and aggregation:
+For filtering, aggregation, and hybrid search:
 
 ```bash
 curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM legal WHERE metadata.author = '\''Alice'\'' LIMIT 10"}'
+  -d '{
+    "query": "SELECT * FROM \"Legal Contracts\" WHERE metadata.status = '\''active'\'' SEARCH '\''termination'\'' LIMIT 10"
+  }'
 ```
 
-Best for:
-- Filtering by metadata
-- Full-text keyword search (SEARCH clause)
-- Aggregations (COUNT, SUM)
-- Combining filters with LLM reasoning (REASON clause)
+**Best for:** Filtering by metadata, keyword search, combining filters with reasoning
 
-## Ingestion Pipeline
+<Info>
+RQL's `REASON` clause lets you combine structured queries with LLM reasoning—filter first, then reason over the results.
+</Info>
 
-When you ingest a document, ReasonDB processes it through several stages:
+## The Ingestion Pipeline
+
+Understanding how documents become trees helps you optimize for your use case:
 
 <Mermaid>
-{`flowchart LR
-    Input[Input: PDF, MD, HTML] --> Extract[Extract Text]
-    Extract --> Chunk[Chunk by Structure]
-    Chunk --> Tree[Build Tree]
-    Tree --> Summarize[LLM Summarize]
-    Summarize --> Index[Index and Store]`}
+{`flowchart TB
+    A[📄 PDF / Markdown / HTML / Text] --> B[Extract Text]
+    B --> C[Chunk by Structure]
+    C --> D[Build Hierarchical Tree]
+    D --> E[Generate LLM Summaries]
+    E --> F[(Knowledge Base)]`}
 </Mermaid>
 
-1. **Extract**: Parse the document format (PDF, Markdown, HTML, etc.)
-2. **Chunk**: Split by headings and semantic boundaries
-3. **Build Tree**: Create hierarchical structure from document outline
-4. **Summarize**: Generate LLM summaries for each node (bottom-up)
-5. **Index**: Store in database with BM25 text index
+1. **Extract**: Parse document format, preserve structural hints
+2. **Chunk**: Split by headings, paragraphs, semantic boundaries
+3. **Build Tree**: Create hierarchy from document outline
+4. **Summarize**: Generate LLM summaries bottom-up (leaves first, then parents)
+5. **Index**: Store with BM25 text search and tree structure
 
-## Next Steps
+<Warning>
+**Summary quality is critical.** Poor summaries lead to poor navigation. ReasonDB uses your configured LLM to generate summaries—better LLM = better summaries = better search.
+</Warning>
+
+## Key Takeaways
 
 <CardGroup cols={2}>
-  <Card title="Document Ingestion" icon="file-arrow-up" href="/guides/ingestion">
-    Learn how to ingest different document types
+  <Card title="Structure Matters" icon="tree">
+    Document hierarchy isn't noise to be discarded—it's signal that enables intelligent navigation.
+  </Card>
+  <Card title="Reason to Retrieve" icon="brain">
+    The LLM doesn't just consume retrieved content—it actively navigates to find the right content.
+  </Card>
+  <Card title="Summaries Enable Navigation" icon="compass">
+    LLM-generated summaries at each node level are what make intelligent traversal possible.
+  </Card>
+  <Card title="Beam Search for Robustness" icon="arrows-split">
+    Parallel exploration handles uncertainty and finds answers even in unexpected places.
+  </Card>
+</CardGroup>
+
+## What's Next?
+
+<CardGroup cols={2}>
+  <Card title="Ingestion Guide" icon="file-arrow-up" href="/guides/ingestion">
+    Master document ingestion for different formats
   </Card>
   <Card title="Search Guide" icon="magnifying-glass" href="/guides/search">
-    Master LLM-guided search parameters
+    Tune traversal parameters for your use case
   </Card>
-  <Card title="RQL Query Language" icon="terminal" href="/guides/rql">
-    Write SQL-like queries
+  <Card title="RQL Language" icon="terminal" href="/guides/rql">
+    Combine structured queries with reasoning
   </Card>
-  <Card title="Architecture" icon="building" href="/advanced/architecture">
-    Deep dive into system design
+  <Card title="Architecture Deep Dive" icon="building" href="/advanced/architecture">
+    Technical details of ReasonDB internals
   </Card>
 </CardGroup>

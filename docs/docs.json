@@ -1,6 +1,7 @@
 {
   "$schema": "https://devdoc.sh/docs.json",
   "name": "ReasonDB",
+  "description": "AI-Native Document Intelligence",
   "docType": "api",
   "favicon": "/assets/favicon.svg",
   "navigation": {

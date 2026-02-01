@@ -427,4 +427,16 @@ When rate limited, the API returns:
 
 ## 📜 License
 
-MIT OR Apache-2.0
+ReasonDB is source-available under the [ReasonDB License v1.0](./LICENSE).
+
+**You can:**
+- ✅ Use ReasonDB for any purpose (commercial or non-commercial)
+- ✅ Modify the source code
+- ✅ Distribute copies and derivative works
+- ✅ Use in your own products and services
+
+**You cannot:**
+- ❌ Offer ReasonDB as a hosted/managed database service (DBaaS)
+- ❌ Provide ReasonDB's functionality as a service to third parties
+
+For commercial licensing to offer ReasonDB as a service, please contact us.
