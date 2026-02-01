@@ -1,58 +1,102 @@
 ---
-title: Tutorials Overview
-description: Hands-on tutorials to learn ReasonDB through real-world use cases
+title: Tutorials
+description: Build real-world AI-powered document applications
 ---
 
-These tutorials guide you through building real applications with ReasonDB. Each tutorial focuses on a specific use case and progressively introduces concepts.
+Learn by building. These tutorials take you from concept to working application, showing you how to harness ReasonDB's intelligent document retrieval for real use cases.
 
-## Learning Path
-
-<Steps>
-  <Step title="RQL Basics">
-    Learn the query language from simple selects to complex reasoning queries
-  </Step>
-  <Step title="Choose a Use Case">
-    Pick a tutorial that matches your domain
-  </Step>
-  <Step title="Build & Experiment">
-    Follow along with working code examples
-  </Step>
-</Steps>
-
-## Tutorials
+## Choose Your Path
 
 <CardGroup cols={2}>
-  <Card title="RQL Query Language" icon="terminal" href="/tutorials/rql-basics">
-    Master ReasonDB's SQL-like query language step by step. Learn SELECT, WHERE, SEARCH, and REASON clauses.
+  <Card title="New to ReasonDB?" icon="rocket-launch" href="/tutorials/rql-basics">
+    Start with **RQL Basics** to master the query language
   </Card>
-  <Card title="Contract Management" icon="files" href="/tutorials/document-relationships">
-    Track master agreements, amendments, work orders, and document versions with linked metadata.
-  </Card>
-  <Card title="Legal Document Search" icon="scale" href="/tutorials/legal-search">
-    Build an intelligent contract analysis system. Search NDAs, extract clauses, and answer legal questions.
-  </Card>
-  <Card title="Knowledge Base Q&A" icon="circle-question" href="/tutorials/knowledge-base">
-    Create a smart FAQ system that understands questions and extracts precise answers from documentation.
-  </Card>
-  <Card title="Research Paper Analysis" icon="flask" href="/tutorials/research-papers">
-    Build a research assistant that searches academic papers and synthesizes findings.
+  <Card title="Ready to Build?" icon="hammer">
+    Jump to a use case that matches your domain below
   </Card>
 </CardGroup>
 
-## Prerequisites
+## Tutorials
 
-Before starting any tutorial, make sure you have:
+<CardGroup cols={1}>
+  <Card title="RQL Query Language Fundamentals" icon="terminal" href="/tutorials/rql-basics">
+    **30 minutes** • Master ReasonDB's SQL-like query language
+    
+    Learn SELECT, WHERE, SEARCH, and REASON clauses. Understand how to combine structured queries with LLM reasoning for powerful hybrid search.
+  </Card>
+</CardGroup>
 
-1. **ReasonDB running** - Follow the [Quickstart](/quickstart) to set up
-2. **An LLM API key** - Anthropic, OpenAI, Gemini, or Cohere
-3. **curl or an HTTP client** - For making API requests
+<CardGroup cols={2}>
+  <Card title="Legal Document Intelligence" icon="gavel" href="/tutorials/legal-search">
+    **45 minutes** • Build a contract analysis system
+    
+    Ingest NDAs and service agreements. Search for specific clauses, compare terms across documents, and answer legal questions with cited sources.
+  </Card>
+  
+  <Card title="Research Paper Assistant" icon="flask" href="/tutorials/research-papers">
+    **45 minutes** • Create an academic research tool
+    
+    Build a system that searches scientific papers, synthesizes findings across studies, and extracts key methodologies and results.
+  </Card>
+  
+  <Card title="Enterprise Knowledge Base" icon="building" href="/tutorials/knowledge-base">
+    **30 minutes** • Deploy intelligent documentation search
+    
+    Transform static docs into an AI-powered Q&A system. Get precise answers instead of "related articles."
+  </Card>
+  
+  <Card title="Document Relationship Tracking" icon="diagram-project" href="/tutorials/document-relationships">
+    **30 minutes** • Manage complex document hierarchies
+    
+    Link master agreements to amendments, track document versions, and query across related documents.
+  </Card>
+</CardGroup>
+
+## What You'll Learn
+
+| Tutorial | Key Skills |
+|----------|------------|
+| **RQL Basics** | Query syntax, SEARCH clause, REASON clause, filtering |
+| **Legal Search** | Multi-document search, clause extraction, confidence scoring |
+| **Research Papers** | Academic ingestion, cross-paper synthesis, citation tracking |
+| **Knowledge Base** | FAQ systems, answer extraction, production deployment |
+| **Document Relationships** | Metadata linking, hierarchical queries, version management |
+
+## Before You Start
+
+<Steps>
+  <Step title="Complete the Quickstart">
+    Make sure ReasonDB is [installed and running](/quickstart) with your LLM configured.
+  </Step>
+  <Step title="Have an HTTP Client Ready">
+    Tutorials use `curl` commands. Any HTTP client works.
+  </Step>
+  <Step title="Set Aside Focused Time">
+    Each tutorial is designed to complete in one session.
+  </Step>
+</Steps>
 
 ## Tutorial Format
 
-Each tutorial includes:
+Every tutorial follows the same structure:
 
-- **Goal**: What you'll build
-- **Sample Data**: Pre-made documents to ingest
-- **Step-by-Step Instructions**: Detailed walkthrough
-- **Working Examples**: Copy-paste curl commands
-- **Challenges**: Optional exercises to extend your learning
+- **Goal**: What you'll build and why it matters
+- **Sample Data**: Pre-made documents so you can follow along exactly
+- **Step-by-Step**: Detailed walkthrough with explanations
+- **Working Code**: Copy-paste commands that actually work
+- **Challenges**: Optional exercises to deepen understanding
+
+<Tip>
+**Pro tip**: Run the commands as you read. Building muscle memory with real queries is more valuable than passive reading.
+</Tip>
+
+## Ready?
+
+<CardGroup cols={2}>
+  <Card title="Start with RQL Basics" icon="play" href="/tutorials/rql-basics">
+    The recommended starting point for everyone
+  </Card>
+  <Card title="Jump to Legal Search" icon="forward" href="/tutorials/legal-search">
+    If you're already comfortable with the basics
+  </Card>
+</CardGroup>

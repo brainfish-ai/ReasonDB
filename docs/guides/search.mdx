@@ -1,256 +1,311 @@
 ---
-title: LLM-Guided Search
-description: Learn how to use ReasonDB's intelligent tree traversal search
+title: Intelligent Search
+description: Master LLM-guided document retrieval that finds answers, not just matches
 ---
 
-ReasonDB's search is fundamentally different from traditional keyword or vector search. An LLM navigates your document trees, choosing branches based on node summaries until it finds relevant content and extracts answers.
+ReasonDB search is fundamentally different. Instead of returning "similar" chunks and hoping one is useful, the LLM actively navigates your document structure to find exactly what you need—then extracts a precise answer.
 
-## Basic Search
+## The Basics
+
+Ask a question. Get an answer.
 
 ```bash
 curl -X POST http://localhost:4444/v1/search \
   -H "Content-Type: application/json" \
-  -d '{"query": "What are the benefits of machine learning?"}'
+  -d '{"query": "What are the late payment penalties?"}'
 ```
 
-Response:
 ```json
 {
   "results": [{
-    "node_id": "node_xyz",
-    "document_id": "doc_abc",
-    "path": [
-      {"node_id": "node_root", "title": "ML Handbook"},
-      {"node_id": "node_ch1", "title": "Chapter 1: Introduction"}
-    ],
-    "content": "Machine learning offers several key benefits...",
-    "answer": "The main benefits of machine learning include automation of complex tasks, pattern recognition in large datasets, and predictive capabilities.",
-    "confidence": 0.89
+    "node_id": "node_payment_3",
+    "document_id": "doc_contract",
+    "path": ["Service Agreement", "Payment Terms", "Late Penalties"],
+    "content": "Late payments will incur interest at 1.5% per month...",
+    "answer": "Late payments incur 1.5% monthly interest, compounded. After 60 days, service may be suspended.",
+    "confidence": 0.94
   }],
   "stats": {
-    "nodes_visited": 8,
-    "nodes_pruned": 12,
-    "llm_calls": 5,
-    "total_time_ms": 2340
+    "nodes_visited": 5,
+    "nodes_pruned": 8,
+    "llm_calls": 4,
+    "total_time_ms": 1850
   }
 }
 ```
 
-## How Search Works
+**What happened:**
+1. LLM read top-level summaries → identified "Payment Terms" as relevant
+2. Drilled into subsections → found "Late Penalties"
+3. Extracted and synthesized the answer
+4. Returned the path taken and confidence score
+
+## How It Works
 
 <Mermaid>
 {`sequenceDiagram
-    participant User
-    participant API
+    participant You
+    participant ReasonDB
     participant LLM
-    participant DB
-
-    User->>API: Query: What is backprop?
-    API->>DB: Get root node summaries
-    DB-->>API: Node summaries
-    API->>LLM: Which nodes are relevant?
-    LLM-->>API: Neural Networks 0.9, Algorithms 0.4
-    Note over API: Prune low confidence branches
-    API->>DB: Get Neural Networks children
-    DB-->>API: Child summaries
-    API->>LLM: Which children are relevant?
-    LLM-->>API: Backpropagation 0.95
-    API->>DB: Get leaf content
-    API->>LLM: Extract answer from content
-    LLM-->>API: Backpropagation is...
-    API-->>User: Results + path + confidence`}
+    participant Knowledge Tree
+    
+    You->>ReasonDB: "What are the late payment penalties?"
+    
+    ReasonDB->>Knowledge Tree: Get root summaries
+    ReasonDB->>LLM: Which sections might answer this?
+    LLM-->>ReasonDB: Payment Terms (0.92), Termination (0.35)
+    
+    Note over ReasonDB: Prune low-confidence branches
+    
+    ReasonDB->>Knowledge Tree: Get Payment Terms children
+    ReasonDB->>LLM: Which subsection is most relevant?
+    LLM-->>ReasonDB: Late Penalties (0.96)
+    
+    ReasonDB->>Knowledge Tree: Get leaf content
+    ReasonDB->>LLM: Extract the answer
+    LLM-->>ReasonDB: "Late payments incur 1.5%..."
+    
+    ReasonDB-->>You: Answer + path + confidence`}
 </Mermaid>
 
 ## Search Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `query` | string | required | Natural language question |
-| `document_id` | string | null | Search within specific document |
-| `table_id` | string | null | Restrict to specific table |
-| `tags` | string[] | null | Filter by document tags |
-| `metadata` | object | null | Filter by metadata fields (e.g., author, department) |
-| `max_depth` | int | 10 | Maximum tree depth to traverse |
-| `beam_width` | int | 3 | Branches to explore in parallel |
-| `min_confidence` | float | 0.3 | Prune branches below this confidence |
-| `limit` | int | 10 | Maximum results to return |
+Fine-tune search behavior for your use case:
 
-## Filtering Search
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `query` | *required* | Your natural language question |
+| `beam_width` | 3 | Branches to explore in parallel |
+| `max_depth` | 10 | How deep to traverse |
+| `min_confidence` | 0.3 | Prune threshold |
+| `table_id` | all | Restrict to specific table |
+| `document_id` | all | Search single document |
+| `limit` | 10 | Max results to return |
 
-### By Table
+## Scoping Your Search
 
-Search only within a specific table:
+### Search a Specific Table
 
 ```bash
 curl -X POST http://localhost:4444/v1/search \
   -d '{
     "query": "confidentiality obligations",
-    "table_id": "tbl_legal"
+    "table_id": "tbl_legal_contracts"
   }'
 ```
 
-### By Document
-
-Search within a single document:
+### Search a Single Document
 
 ```bash
 curl -X POST http://localhost:4444/v1/search \
   -d '{
-    "query": "return policy",
-    "document_id": "doc_terms_of_service"
+    "query": "What is the notice period?",
+    "document_id": "doc_employment_agreement"
   }'
 ```
 
-### By Tags
-
-Filter to documents with specific tags:
+### Filter by Metadata
 
 ```bash
 curl -X POST http://localhost:4444/v1/search \
   -d '{
-    "query": "payment terms",
-    "tags": ["nda", "confidential"]
-  }'
-```
-
-### By Metadata
-
-Filter by custom metadata fields:
-
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -d '{
-    "query": "liability clause",
+    "query": "liability limits",
     "metadata": {
       "contract_type": "service_agreement",
-      "value_usd": 100000
+      "status": "active"
     }
   }'
 ```
 
-## Tuning Search Quality
-
-### Beam Width
-
-Controls how many branches to explore in parallel at each level:
+### Filter by Tags
 
 ```bash
-# Narrow search (faster, may miss results)
 curl -X POST http://localhost:4444/v1/search \
-  -d '{"query": "...", "beam_width": 1}'
-
-# Wide search (slower, more thorough)
-curl -X POST http://localhost:4444/v1/search \
-  -d '{"query": "...", "beam_width": 5}'
+  -d '{
+    "query": "intellectual property rights",
+    "tags": ["nda", "confidential"]
+  }'
 ```
 
-<Tip>
-Use `beam_width: 1` for simple factual queries and `beam_width: 5` for complex questions that may have multiple relevant sections.
-</Tip>
+## Tuning for Quality vs Speed
 
-### Min Confidence
+### Beam Width: Breadth of Exploration
 
-Prune branches with confidence below this threshold:
+**Low beam width (1-2)**: Fast, focused. Best for specific factual questions.
 
 ```bash
-# Strict pruning (faster, more focused)
+curl -X POST http://localhost:4444/v1/search \
+  -d '{"query": "What is the contract effective date?", "beam_width": 1}'
+```
+
+**High beam width (4-5)**: Thorough, slower. Best for complex questions with multiple relevant sections.
+
+```bash
+curl -X POST http://localhost:4444/v1/search \
+  -d '{"query": "What are all the ways this contract can be terminated?", "beam_width": 5}'
+```
+
+### Min Confidence: Pruning Aggressiveness
+
+**High threshold (0.5+)**: Aggressive pruning, faster, might miss edge cases.
+
+```bash
 curl -X POST http://localhost:4444/v1/search \
   -d '{"query": "...", "min_confidence": 0.5}'
+```
 
-# Relaxed pruning (slower, explores more)
+**Low threshold (0.2)**: Explores more branches, slower, more comprehensive.
+
+```bash
 curl -X POST http://localhost:4444/v1/search \
   -d '{"query": "...", "min_confidence": 0.2}'
 ```
 
-### Max Depth
-
-Limit how deep into the tree to traverse:
+### Max Depth: How Deep to Go
 
 ```bash
-# Shallow search (faster, high-level results)
+# High-level overview (fast)
 curl -X POST http://localhost:4444/v1/search \
   -d '{"query": "...", "max_depth": 3}'
 
-# Deep search (slower, detailed results)
+# Detailed deep search (thorough)
 curl -X POST http://localhost:4444/v1/search \
   -d '{"query": "...", "max_depth": 15}'
 ```
 
 ## Understanding Results
 
-### Path Breadcrumbs
+### The Path: How ReasonDB Got There
 
-Each result includes the path the LLM took to find it:
+Every result includes the navigation path—this is explainability built in:
 
 ```json
 {
   "path": [
-    {"node_id": "node_1", "title": "ML Handbook", "reasoning": "Document about ML"},
-    {"node_id": "node_5", "title": "Chapter 3: Training", "reasoning": "Covers training methods"},
-    {"node_id": "node_12", "title": "Backpropagation", "reasoning": "Directly answers the query"}
+    "Service Agreement",
+    "Section 5: Payment Terms", 
+    "5.2 Late Payment Penalties"
   ]
 }
 ```
 
-This helps you understand why the result was selected and provides context.
+You know exactly which sections the LLM traversed. This is invaluable for:
+- Debugging unexpected results
+- Building trust in AI-generated answers
+- Providing citations in downstream applications
 
 ### Confidence Scores
 
-Confidence (0.0 to 1.0) indicates how relevant the LLM believes the result is:
+| Score | Meaning |
+|-------|---------|
+| **0.9+** | High confidence—directly answers the question |
+| **0.7-0.9** | Strong match—likely what you're looking for |
+| **0.5-0.7** | Moderate—related but may not be exact |
+| **0.3-0.5** | Low—tangentially related |
+| **< 0.3** | Pruned—not returned |
 
-| Score | Interpretation |
-|-------|----------------|
-| 0.9+ | High confidence, directly answers query |
-| 0.7-0.9 | Good match, likely relevant |
-| 0.5-0.7 | Moderate relevance |
-| 0.3-0.5 | Low confidence, tangentially related |
-| Below 0.3 | Pruned, not returned |
-
-### Extracted Answers
-
-The `answer` field contains the LLM's extracted answer from the content:
+### The Answer vs The Content
 
 ```json
 {
-  "content": "Backpropagation is an algorithm for training neural networks by computing gradients...",
-  "answer": "Backpropagation is an algorithm used to train neural networks by computing gradients of the loss function with respect to network weights, enabling optimization through gradient descent."
+  "content": "Section 5.2: Late payments shall incur interest at a rate of 1.5% per calendar month, calculated from the due date. Interest shall compound monthly. After 60 days of non-payment, Provider reserves the right to suspend services...",
+  
+  "answer": "Late payments incur 1.5% monthly interest (compounding). After 60 days, services may be suspended."
 }
 ```
 
+- **content**: The raw text from the document
+- **answer**: LLM-synthesized response to your specific question
+
 ## Search vs RQL Queries
 
-| Feature | Search (`/v1/search`) | Query (`/v1/query`) |
-|---------|----------------------|---------------------|
-| Input | Natural language | SQL-like RQL |
-| Method | LLM tree traversal | Filter + BM25/LLM |
-| Best for | Complex questions | Filtering, aggregations |
-| Answer extraction | Yes | Optional (REASON clause) |
-| Speed | Slower (LLM calls) | Faster for simple queries |
+| Need | Use |
+|------|-----|
+| Natural language question | `POST /v1/search` |
+| Filter + keyword search | `POST /v1/query` with `SEARCH` |
+| Filter + LLM reasoning | `POST /v1/query` with `REASON` |
+| Aggregations | `POST /v1/query` |
 
-For complex filtering combined with semantic search, use RQL with the REASON clause:
+### Combining Filters with Reasoning
+
+For complex scenarios, use RQL with the REASON clause:
 
 ```bash
 curl -X POST http://localhost:4444/v1/query \
   -d '{
-    "query": "SELECT * FROM legal WHERE metadata.author = '\''Alice'\'' REASON '\''What are the termination clauses?'\''"
+    "query": "SELECT * FROM \"Legal Contracts\" WHERE metadata.status = '\''active'\'' AND metadata.value_usd > 100000 REASON '\''What are the termination conditions?'\'' LIMIT 5"
   }'
 ```
 
-## Performance Tips
+This filters first (fast), then reasons over the filtered set (thorough).
 
-1. **Use specific tables**: Narrowing to a table reduces the search space
-2. **Add tags**: Filter by tags to focus the search
-3. **Adjust beam width**: Lower for simple queries, higher for complex
-4. **Set appropriate depth**: Shallow for overviews, deep for details
-5. **Cache common queries**: Results are cached for repeated REASON queries
+## Performance Optimization
+
+<CardGroup cols={2}>
+  <Card title="Scope Narrowly" icon="crosshairs">
+    Always specify `table_id` or `document_id` when possible. Smaller search space = faster results.
+  </Card>
+  <Card title="Right-size Beam Width" icon="sliders">
+    Start with 2-3 for most queries. Only increase for exploratory questions.
+  </Card>
+  <Card title="Use Metadata Filters" icon="filter">
+    Filter by metadata before semantic search. Let the database do the easy work.
+  </Card>
+  <Card title="Adjust Confidence Threshold" icon="gauge">
+    Higher threshold for speed, lower for thoroughness.
+  </Card>
+</CardGroup>
+
+## Common Patterns
+
+### Q&A Bot
+
+```bash
+curl -X POST http://localhost:4444/v1/search \
+  -d '{
+    "query": "How do I reset my password?",
+    "table_id": "tbl_support_docs",
+    "beam_width": 2,
+    "limit": 1
+  }'
+```
+
+### Research Assistant
+
+```bash
+curl -X POST http://localhost:4444/v1/search \
+  -d '{
+    "query": "What methods have been used for sentiment analysis?",
+    "table_id": "tbl_research_papers",
+    "beam_width": 4,
+    "limit": 5
+  }'
+```
+
+### Contract Analyzer
+
+```bash
+curl -X POST http://localhost:4444/v1/search \
+  -d '{
+    "query": "What are the indemnification obligations?",
+    "document_id": "doc_master_service_agreement",
+    "beam_width": 3
+  }'
+```
 
 ## Next Steps
 
 <CardGroup cols={2}>
   <Card title="RQL Query Language" icon="terminal" href="/guides/rql">
-    Combine filtering with semantic search
+    Combine structured queries with reasoning
+  </Card>
+  <Card title="Ingestion Guide" icon="file-arrow-up" href="/guides/ingestion">
+    Optimize documents for better search
   </Card>
   <Card title="Tables Guide" icon="table" href="/guides/tables">
-    Organize documents for better search
+    Organize content for efficient retrieval
+  </Card>
+  <Card title="Legal Search Tutorial" icon="gavel" href="/tutorials/legal-search">
+    Build a complete contract search system
   </Card>
 </CardGroup>

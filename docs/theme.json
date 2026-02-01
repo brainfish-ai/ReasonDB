@@ -3,9 +3,9 @@
   "logo": {
     "light": "/assets/logo.svg",
     "dark": "/assets/logo.svg",
-    "alt": "Documentation",
-    "width": 120,
-    "height": 24
+    "alt": "ReasonDB",
+    "width": 140,
+    "height": 28
   },
   "header": {
     "showAskAI": true,
@@ -16,16 +16,73 @@
     "links": [
       {
         "label": "GitHub",
-        "href": "https://github.com/brainfish-ai/devdoc",
+        "href": "https://github.com/reasondb/reasondb",
         "external": true
       }
     ]
   },
   "colors": {
-    "primary": "#10b981",
-    "primaryLight": "#10b981",
-    "primaryDark": "#10b981"
+    "primary": "#cba6f7",
+    "primaryLight": "#cba6f7",
+    "primaryDark": "#cba6f7",
+    "background": {
+      "light": "#eff1f5",
+      "dark": "#1e1e2e"
+    },
+    "backgroundSecondary": {
+      "light": "#e6e9ef",
+      "dark": "#181825"
+    },
+    "card": {
+      "light": "#dce0e8",
+      "dark": "#313244"
+    },
+    "border": {
+      "light": "#bcc0cc",
+      "dark": "#45475a"
+    },
+    "text": {
+      "light": "#4c4f69",
+      "dark": "#cdd6f4"
+    },
+    "textMuted": {
+      "light": "#6c6f85",
+      "dark": "#a6adc8"
+    },
+    "accent": {
+      "light": "#8839ef",
+      "dark": "#cba6f7"
+    },
+    "accentSecondary": {
+      "light": "#1e66f5",
+      "dark": "#89b4fa"
+    },
+    "success": {
+      "light": "#40a02b",
+      "dark": "#a6e3a1"
+    },
+    "warning": {
+      "light": "#df8e1d",
+      "dark": "#f9e2af"
+    },
+    "error": {
+      "light": "#d20f39",
+      "dark": "#f38ba8"
+    },
+    "info": {
+      "light": "#04a5e5",
+      "dark": "#89dceb"
+    }
   },
-  "defaultTheme": "system",
-  "customCss": "custom.css"
+  "defaultTheme": "dark",
+  "customCss": "custom.css",
+  "fonts": {
+    "body": "Inter, SF Pro Display, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
+    "code": "JetBrains Mono, SF Mono, Fira Code, Cascadia Code, monospace"
+  },
+  "borderRadius": "0.5rem",
+  "codeTheme": {
+    "light": "github-light",
+    "dark": "one-dark-pro"
+  }
 }

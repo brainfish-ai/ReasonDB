@@ -1,134 +1,182 @@
 ---
-title: Introduction to ReasonDB
-description: A reasoning-native database for AI agent workflows with LLM-guided tree traversal
+title: ReasonDB - AI-Native Document Intelligence
+description: The database that understands your documents. Built for AI agents that need to reason, not just retrieve.
 ---
 
-ReasonDB is a database that thinks, not just calculates. Unlike Vector DBs (mathematical similarity) or SQL DBs (relational algebra), ReasonDB optimizes for **tree traversal** and **LLM-driven context management** - the patterns AI agents actually need.
+**Your documents hold answers. ReasonDB finds them.**
 
-## Why ReasonDB?
+While traditional databases treat documents as data to be indexed, ReasonDB treats them as knowledge to be understood. It's the first database designed from the ground up for how AI actually thinks—navigating hierarchical context, reasoning through complexity, and extracting precise answers from unstructured content.
 
-Traditional databases struggle with AI agent workflows:
+<Info>
+**ReasonDB is not another vector database.** It's a reasoning engine that preserves document structure, enabling AI to traverse your knowledge like a human expert would—scanning summaries, drilling into relevant sections, and synthesizing answers with full context.
+</Info>
 
-| Approach | Best For | Limitation |
-|----------|----------|------------|
-| **Vector DB** | Simple factual queries | Loses structure, "similar" ≠ "relevant" |
-| **SQL DB** | Structured data | Can't handle unstructured text |
-| **Graph DB** | Relationships | Requires explicit entity extraction |
-| **ReasonDB** | Complex reasoning | Optimized for AI agent workflows |
+## The Problem with Current Approaches
 
-## Key Features
+AI agents today are crippled by their databases:
 
-<CardGroup cols={2}>
-  <Card title="Hierarchical Document Storage" icon="tree">
-    Documents stored as navigable trees, not flat chunks. Preserves structure and context.
+| Approach | What It Does | Why It Fails |
+|----------|--------------|--------------|
+| **Vector DBs** | Finds "similar" chunks | Loses structure. A contract's termination clause isn't "similar" to your question about exit terms—but it's the answer. |
+| **RAG Pipelines** | Retrieves then generates | Garbage in, garbage out. Retrieving wrong chunks means wrong answers, no matter how good your LLM. |
+| **Knowledge Graphs** | Maps explicit relationships | Requires manual entity extraction. Can't handle the messy reality of real documents. |
+
+**The result?** AI agents that hallucinate, miss critical context, or drown in irrelevant chunks.
+
+## ReasonDB: Intelligence by Design
+
+ReasonDB introduces **Hierarchical Reasoning Retrieval (HRR)**—a fundamentally new architecture where the LLM doesn't just consume retrieved content, it actively navigates your document structure to find exactly what it needs.
+
+<CardGroup cols={3}>
+  <Card title="Structure-Aware" icon="tree">
+    Documents become navigable trees, preserving the hierarchy that makes complex documents understandable.
   </Card>
-  <Card title="LLM-Guided Retrieval" icon="robot">
-    AI reasons through the tree structure using summaries, not just similarity scores.
+  <Card title="LLM-Guided Traversal" icon="brain">
+    AI reasons through summaries at each level, choosing which branches to explore—like an expert scanning a document.
   </Card>
-  <Card title="Parallel Branch Exploration" icon="arrows-split">
-    Concurrent traversal using beam search for efficient multi-path exploration.
-  </Card>
-  <Card title="RQL Query Language" icon="magnifying-glass">
-    SQL-like queries with SEARCH (BM25) and REASON (LLM) clauses.
-  </Card>
-  <Card title="API Key Authentication" icon="key">
-    Secure production deployments with API keys and fine-grained permissions.
-  </Card>
-  <Card title="PostgreSQL-like Config" icon="gear">
-    Familiar configuration experience with persistent settings and CLI commands.
+  <Card title="Parallel Beam Search" icon="arrows-split">
+    Explore multiple promising paths simultaneously. Find answers even when they're buried in unexpected places.
   </Card>
 </CardGroup>
 
+## See the Difference
+
+<Tabs>
+  <Tab title="Vector DB Approach">
+    ```
+    Query: "What are the termination conditions?"
+    
+    → Embed query as vector
+    → Find 5 "similar" chunks
+    → Hope one contains the answer
+    
+    Result: Random paragraphs mentioning "termination" 
+            scattered across the document. No context.
+            LLM hallucinates missing details.
+    ```
+  </Tab>
+  <Tab title="ReasonDB Approach">
+    ```
+    Query: "What are the termination conditions?"
+    
+    → LLM reads document summary
+    → Identifies "Section 8: Termination" as relevant
+    → Navigates to section, reads subsection summaries
+    → Drills into "8.2 Conditions for Termination"
+    → Extracts complete answer with full context
+    
+    Result: Precise answer citing specific clauses,
+            with confidence score and reasoning path.
+    ```
+  </Tab>
+</Tabs>
+
 ## How It Works
 
+<Steps>
+  <Step title="Ingest Your Documents">
+    Upload PDFs, Markdown, HTML, or plain text. ReasonDB parses structure, builds a hierarchical knowledge tree, and generates LLM summaries for every node.
+  </Step>
+  <Step title="Ask Natural Language Questions">
+    Query in plain English. The LLM reads node summaries to navigate the tree intelligently—no keyword matching, actual reasoning.
+  </Step>
+  <Step title="Get Precise Answers">
+    Receive synthesized answers with confidence scores, source citations, and the exact reasoning path taken through your documents.
+  </Step>
+</Steps>
+
 <Mermaid>
-{`flowchart LR
-    subgraph Ingest["1. Ingest"]
-        Doc[Document] --> Parse[Parse & Chunk]
-        Parse --> Tree[Build Tree]
-        Tree --> Sum[LLM Summarize]
-    end
-
-    subgraph Search["2. Search"]
-        Query[Query] --> LLM[LLM Evaluates]
-        LLM --> Branch[Choose Branches]
-        Branch --> Answer[Extract Answer]
-    end
-
-    Sum --> Search`}
+{`flowchart TB
+    A[📄 Documents] --> B[Parse & Chunk]
+    B --> C[🌳 Build Tree]
+    C --> D[✨ Summarize]
+    D --> E[(Knowledge Base)]
+    
+    F[❓ Your Question] --> G[🧠 LLM Navigates]
+    E --> G
+    G --> H[🎯 Extract Answer]
+    H --> I[✅ Answer + Confidence]`}
 </Mermaid>
 
-1. **Ingest**: Documents are parsed, chunked, and organized into hierarchical trees with LLM-generated summaries
-2. **Search**: The LLM traverses the tree, choosing branches based on summaries until it finds relevant content
-3. **Return**: Results include the content, extracted answers, and confidence scores
+## Quick Start
 
-## Quick Example
+Get from zero to intelligent document search in under 5 minutes:
 
 ```bash
-# Configure your LLM API key (stored securely)
-reasondb config set llm.provider anthropic
-reasondb config set llm.api_key sk-ant-xxxxx
+# Install and configure
+git clone https://github.com/reasondb/reasondb.git && cd reasondb
+cargo build --release
+reasondb config init  # Interactive setup wizard
 
 # Start the server
 reasondb serve
 
-# Create a table
+# Create a knowledge base
 curl -X POST http://localhost:4444/v1/tables \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Research Papers"}'
+  -d '{"name": "Contracts"}'
 
 # Ingest a document
 curl -X POST http://localhost:4444/v1/ingest/text \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "AI Fundamentals",
-    "table_id": "tbl_...",
-    "content": "# AI Fundamentals\n\nArtificial Intelligence is..."
-  }'
+  -d '{"title": "Service Agreement", "table_id": "tbl_...", "content": "..."}'
 
-# Search with LLM reasoning
+# Ask questions in natural language
 curl -X POST http://localhost:4444/v1/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is machine learning?"}'
+  -d '{"query": "What are the payment terms and late fees?"}'
 ```
 
-## Getting Started
+## Built for Production
 
 <CardGroup cols={2}>
-  <Card title="Quickstart" icon="rocket-launch" href="/quickstart">
-    Get up and running in 5 minutes
+  <Card title="RQL Query Language" icon="terminal">
+    SQL-like syntax with `SEARCH` (BM25) and `REASON` (LLM) clauses. Familiar yet powerful.
   </Card>
-  <Card title="Core Concepts" icon="book-open" href="/concepts">
-    Understand trees, nodes, and reasoning
+  <Card title="Multi-Provider LLM Support" icon="plug">
+    Anthropic, OpenAI, Gemini, Cohere. Switch providers without code changes.
   </Card>
-  <Card title="Configuration" icon="gear" href="/guides/configuration">
-    Configure LLM providers and server settings
+  <Card title="API Key Authentication" icon="shield-check">
+    Production-ready security with fine-grained permissions and rate limiting.
   </Card>
-  <Card title="Authentication" icon="key" href="/guides/authentication">
-    Secure your API with API keys
-  </Card>
-  <Card title="API Reference" icon="code" href="/api-reference/introduction">
-    Explore the full REST API
-  </Card>
-  <Card title="Guides" icon="map" href="/guides/ingestion">
-    Learn common workflows
+  <Card title="High Performance" icon="lightning">
+    Rust-powered. ACID-compliant. Async parallel traversal. Sub-second responses.
   </Card>
 </CardGroup>
 
-## Supported LLM Providers
+## Use Cases
 
-ReasonDB supports multiple LLM providers out of the box:
+<AccordionGroup>
+  <Accordion title="Legal Document Analysis" icon="gavel">
+    Navigate complex contracts, find specific clauses, compare terms across agreements. ReasonDB understands document structure—sections, subsections, definitions, exhibits.
+  </Accordion>
+  <Accordion title="Research & Knowledge Management" icon="graduation-cap">
+    Build searchable knowledge bases from papers, reports, and documentation. Ask questions across thousands of documents and get cited answers.
+  </Accordion>
+  <Accordion title="Customer Support Intelligence" icon="headset">
+    Transform support documentation into an AI agent that finds precise answers, not just "related articles."
+  </Accordion>
+  <Accordion title="Compliance & Policy" icon="shield-check">
+    Query policy documents in natural language. Get answers with specific section references and confidence scores.
+  </Accordion>
+</AccordionGroup>
 
-- **Anthropic Claude** - Set `ANTHROPIC_API_KEY`
-- **OpenAI** - Set `OPENAI_API_KEY`
-- **Google Gemini** - Set `GEMINI_API_KEY`
-- **Cohere** - Set `COHERE_API_KEY`
+## Start Building
 
-## Tech Stack
+<CardGroup cols={2}>
+  <Card title="5-Minute Quickstart" icon="rocket-launch" href="/quickstart">
+    Install, configure, and run your first intelligent search.
+  </Card>
+  <Card title="Core Concepts" icon="lightbulb" href="/concepts">
+    Understand trees, nodes, and hierarchical reasoning.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/introduction">
+    Complete REST API documentation with examples.
+  </Card>
+  <Card title="Tutorials" icon="book-open" href="/tutorials">
+    Build real applications: legal search, research assistants, and more.
+  </Card>
+</CardGroup>
 
-ReasonDB is built with Rust for performance and reliability:
+---
 
-- **Storage**: `redb` - Pure Rust, ACID-compliant embedded database
-- **HTTP Server**: `axum` - Fast, ergonomic web framework
-- **Async Runtime**: `tokio` - Parallel branch exploration
-- **LLM Integration**: `rig-core` - Multi-provider LLM abstraction
+<Note>
+**Source Available & Extensible**: ReasonDB is free to use, modify, and distribute under the [ReasonDB License](https://github.com/reasondb/reasondb/blob/main/LICENSE). Built with Rust for performance, designed for extension. Star us on [GitHub](https://github.com/reasondb/reasondb).
+</Note>

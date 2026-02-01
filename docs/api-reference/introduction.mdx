@@ -1,231 +1,239 @@
 ---
-title: API Introduction
-description: Getting started with the ReasonDB REST API
+title: API Reference
+description: Complete REST API for AI-native document intelligence
 ---
 
-The ReasonDB API provides programmatic access to document ingestion, LLM-guided search, and RQL queries. This section covers the API structure, request format, and common patterns.
+The ReasonDB API gives you programmatic access to intelligent document storage, LLM-guided search, and structured queries. Build applications that understand documents, not just store them.
+
+<Info>
+**Interactive Playground**: Explore and test all endpoints at `http://localhost:4444/swagger-ui/`
+</Info>
 
 ## Base URL
-
-All API requests should be made to:
 
 ```
 http://localhost:4444/v1
 ```
 
 <Note>
-The base URL depends on your `REASONDB_HOST` and `REASONDB_PORT` configuration. The default is `localhost:4444`.
+Configure with `REASONDB_HOST` and `REASONDB_PORT`. Default: `localhost:4444`
 </Note>
 
-## Interactive Documentation
+## Quick Reference
 
-Swagger UI is available at:
+### Core Endpoints
 
-```
-http://localhost:4444/swagger-ui/
-```
-
-Use the interactive playground to test endpoints directly from your browser.
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /v1/search` | **LLM-guided search** — Ask questions, get answers with reasoning |
+| `POST /v1/query` | **RQL queries** — SQL-like queries with SEARCH and REASON clauses |
+| `POST /v1/ingest/text` | **Ingest documents** — Transform text into navigable knowledge trees |
+| `POST /v1/tables` | **Create collections** — Organize documents into searchable groups |
 
 ## Authentication
 
-When authentication is enabled, include your API key in requests:
+When auth is enabled, include your API key:
 
-```bash
-# Using Authorization header (recommended)
-curl -X POST http://localhost:4444/v1/search \
-  -H "Authorization: Bearer rdb_live_xxxxx" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is machine learning?"}'
+<Tabs>
+  <Tab title="Authorization Header (Recommended)">
+    ```bash
+    curl -X POST http://localhost:4444/v1/search \
+      -H "Authorization: Bearer rdb_live_xxxxx" \
+      -H "Content-Type: application/json" \
+      -d '{"query": "What are the payment terms?"}'
+    ```
+  </Tab>
+  <Tab title="X-API-Key Header">
+    ```bash
+    curl -X POST http://localhost:4444/v1/search \
+      -H "X-API-Key: rdb_live_xxxxx" \
+      -H "Content-Type: application/json" \
+      -d '{"query": "What are the payment terms?"}'
+    ```
+  </Tab>
+</Tabs>
 
-# Or using X-API-Key header
-curl -X POST http://localhost:4444/v1/search \
-  -H "X-API-Key: rdb_live_xxxxx" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is machine learning?"}'
-```
+<Tip>
+Authentication is optional in development. Enable for production with `--auth-enabled`. See [Authentication Guide](/guides/authentication).
+</Tip>
 
-<Note>
-Authentication is optional by default. Enable it for production deployments with `--auth-enabled` flag. See the [Authentication Guide](/guides/authentication) for details.
-</Note>
+## Complete API Reference
 
-## Request Format
-
-The API accepts JSON-encoded request bodies and returns JSON-encoded responses.
-
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is machine learning?"}'
-```
-
-### Content Types
-
-| Endpoint | Content-Type |
-|----------|--------------|
-| Most endpoints | `application/json` |
-| File upload | `multipart/form-data` |
-
-## API Endpoints Overview
-
-### Tables
-
-Organize documents into collections:
+### Tables — Organize Your Knowledge
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/v1/tables` | Create a table |
+| `POST` | `/v1/tables` | Create a new table |
 | `GET` | `/v1/tables` | List all tables |
 | `GET` | `/v1/tables/{id}` | Get table details |
-| `PATCH` | `/v1/tables/{id}` | Update a table |
-| `DELETE` | `/v1/tables/{id}` | Delete a table |
+| `PATCH` | `/v1/tables/{id}` | Update table metadata |
+| `DELETE` | `/v1/tables/{id}` | Delete table and all documents |
 | `GET` | `/v1/tables/{id}/documents` | List documents in table |
 
-### Ingestion
-
-Import documents into ReasonDB:
+### Ingestion — Build Knowledge Trees
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/v1/ingest/text` | Ingest text/markdown |
-| `POST` | `/v1/ingest/file` | Upload and ingest file |
-| `POST` | `/v1/ingest/url` | Ingest from URL |
+| `POST` | `/v1/ingest/text` | Ingest text or Markdown |
+| `POST` | `/v1/ingest/file` | Upload and process file (PDF, HTML, etc.) |
+| `POST` | `/v1/ingest/url` | Fetch and ingest from URL |
 
-### Search & Query
-
-Find and retrieve content:
+### Search & Query — Find Answers
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/v1/search` | LLM-guided tree traversal search |
-| `POST` | `/v1/query` | Execute RQL query |
+| `POST` | `/v1/search` | LLM-guided tree traversal with answer extraction |
+| `POST` | `/v1/query` | Execute RQL query with optional REASON clause |
 
-### Documents
-
-Manage ingested documents:
+### Documents — Manage Content
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/v1/documents` | List all documents |
-| `GET` | `/v1/documents/{id}` | Get document details |
-| `DELETE` | `/v1/documents/{id}` | Delete a document |
-| `GET` | `/v1/documents/{id}/nodes` | Get document nodes |
-| `GET` | `/v1/documents/{id}/tree` | Get document tree |
+| `GET` | `/v1/documents/{id}` | Get document metadata |
+| `DELETE` | `/v1/documents/{id}` | Delete document and nodes |
+| `GET` | `/v1/documents/{id}/nodes` | Get all nodes in document |
+| `GET` | `/v1/documents/{id}/tree` | Get full tree structure with summaries |
 
-### Authentication (when enabled)
-
-Manage API keys:
+### Authentication — Secure Access
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/v1/auth/keys` | Create an API key |
-| `GET` | `/v1/auth/keys` | List API keys |
+| `POST` | `/v1/auth/keys` | Create API key |
+| `GET` | `/v1/auth/keys` | List all keys |
 | `GET` | `/v1/auth/keys/{id}` | Get key details |
-| `POST` | `/v1/auth/keys/{id}/revoke` | Revoke a key |
-| `POST` | `/v1/auth/keys/{id}/rotate` | Rotate a key |
-| `DELETE` | `/v1/auth/keys/{id}` | Delete a key |
+| `POST` | `/v1/auth/keys/{id}/revoke` | Revoke key |
+| `POST` | `/v1/auth/keys/{id}/rotate` | Rotate key (new secret) |
+| `DELETE` | `/v1/auth/keys/{id}` | Delete key permanently |
 
-## Common Request Patterns
+## Common Workflows
 
-### Create a Table First
-
-Before ingesting documents, create a table:
+### Workflow 1: Ingest and Search
 
 ```bash
-# 1. Create a table
-curl -X POST http://localhost:4444/v1/tables \
+# Step 1: Create a table
+TABLE_ID=$(curl -s -X POST http://localhost:4444/v1/tables \
   -H "Content-Type: application/json" \
-  -d '{"name": "My Documents"}'
+  -d '{"name": "Contracts"}' | jq -r '.id')
 
-# Response includes table ID
-{"id": "tbl_abc123", ...}
-```
-
-### Ingest Documents
-
-Use the table ID when ingesting:
-
-```bash
-# 2. Ingest a document
-curl -X POST http://localhost:4444/v1/ingest/text \
+# Step 2: Ingest a document
+DOC_ID=$(curl -s -X POST http://localhost:4444/v1/ingest/text \
   -H "Content-Type: application/json" \
-  -d '{
-    "title": "My Document",
-    "table_id": "tbl_abc123",
-    "content": "# Heading\n\nContent here..."
-  }'
-```
+  -d "{
+    \"title\": \"Service Agreement\",
+    \"table_id\": \"$TABLE_ID\",
+    \"content\": \"# Service Agreement\\n\\n## Payment Terms\\n\\nPayment is due within 30 days...\"
+  }" | jq -r '.document_id')
 
-### Search Content
-
-Search across all documents or filter by table:
-
-```bash
-# 3. Search with LLM reasoning
+# Step 3: Ask questions
 curl -X POST http://localhost:4444/v1/search \
   -H "Content-Type: application/json" \
+  -d '{"query": "When is payment due?"}'
+```
+
+### Workflow 2: RQL Query with Reasoning
+
+```bash
+# Combine structured filters with LLM reasoning
+curl -X POST http://localhost:4444/v1/query \
+  -H "Content-Type: application/json" \
   -d '{
-    "query": "What is the main topic?",
-    "table_id": "tbl_abc123"
+    "query": "SELECT * FROM Contracts WHERE metadata.status = '\''active'\'' REASON '\''What are the termination conditions?'\'' LIMIT 5"
   }'
 ```
 
 ## Response Format
 
-Successful responses return the requested data directly:
+### Success Response
 
 ```json
 {
-  "id": "doc_abc123",
-  "title": "My Document",
-  "total_nodes": 5,
-  "max_depth": 2
+  "results": [{
+    "node_id": "node_abc123",
+    "document_id": "doc_xyz789",
+    "content": "Payment is due within 30 days of invoice...",
+    "answer": "Payment is due within 30 days of receiving the invoice.",
+    "confidence": 0.94,
+    "path": ["Service Agreement", "Payment Terms"]
+  }],
+  "stats": {
+    "nodes_visited": 4,
+    "llm_calls": 3,
+    "total_time_ms": 1250
+  }
 }
 ```
 
-Error responses follow a consistent structure:
+### Error Response
 
 ```json
 {
   "error": {
     "code": "NOT_FOUND",
-    "message": "Document not found: doc_xyz"
+    "message": "Document not found: doc_invalid"
   }
 }
 ```
 
-## IDs and References
+## Resource IDs
 
 ReasonDB uses prefixed IDs for clarity:
 
-| Prefix | Resource |
-|--------|----------|
-| `tbl_` | Table |
-| `doc_` | Document |
-| `node_` | Node |
+| Prefix | Resource | Example |
+|--------|----------|---------|
+| `tbl_` | Table | `tbl_7f3a9b2c` |
+| `doc_` | Document | `doc_abc12345` |
+| `node_` | Node | `node_xyz98765` |
+| `rdb_` | API Key | `rdb_live_xxxxx` |
 
 ## Health Check
-
-Verify the server is running:
 
 ```bash
 curl http://localhost:4444/health
 # Returns: OK
 ```
 
+## Rate Limiting
+
+When enabled, the API returns rate limit headers:
+
+```
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 95
+X-RateLimit-Reset: 1640000000
+```
+
+<Warning>
+Exceeding rate limits returns `429 Too Many Requests`. Implement exponential backoff in production applications.
+</Warning>
+
+## SDKs & Libraries
+
+<CardGroup cols={3}>
+  <Card title="Python" icon="python">
+    `pip install reasondb` — Coming soon
+  </Card>
+  <Card title="JavaScript" icon="js">
+    `npm install reasondb` — Coming soon
+  </Card>
+  <Card title="REST" icon="code">
+    Use any HTTP client with the REST API
+  </Card>
+</CardGroup>
+
 ## Next Steps
 
 <CardGroup cols={2}>
   <Card title="Error Handling" icon="triangle-exclamation" href="/api-reference/errors">
-    Understand error responses
-  </Card>
-  <Card title="Tables API" icon="table" href="/api-reference/tables/create-table">
-    Create and manage tables
-  </Card>
-  <Card title="Ingestion API" icon="file-arrow-up" href="/api-reference/ingestion/ingest-text">
-    Ingest documents
+    Understand error codes and responses
   </Card>
   <Card title="Search API" icon="magnifying-glass" href="/api-reference/search/search">
-    Search with LLM reasoning
+    Deep dive into LLM-guided search
+  </Card>
+  <Card title="RQL Reference" icon="terminal" href="/guides/rql">
+    Master the query language
+  </Card>
+  <Card title="Authentication" icon="shield-check" href="/guides/authentication">
+    Secure your API access
   </Card>
 </CardGroup>

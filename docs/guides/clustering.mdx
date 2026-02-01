@@ -3,33 +3,43 @@ title: Clustering & Replication
 description: Deploy ReasonDB in a highly available, distributed cluster
 ---
 
-# Clustering & Replication
-
 ReasonDB supports clustering for high availability and horizontal scaling. This guide covers how to set up and manage a ReasonDB cluster.
 
 ## Architecture Overview
 
 ReasonDB uses a Raft-based consensus protocol for clustering:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    ReasonDB Cluster                          │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│   ┌─────────┐     ┌─────────┐     ┌─────────┐              │
-│   │ Node 1  │────▶│ Node 2  │────▶│ Node 3  │              │
-│   │ LEADER  │◀────│FOLLOWER │◀────│FOLLOWER │              │
-│   └─────────┘     └─────────┘     └─────────┘              │
-│        │                │               │                   │
-│        │  Raft Log Replication          │                   │
-│        ▼                ▼               ▼                   │
-│   ┌─────────┐     ┌─────────┐     ┌─────────┐              │
-│   │  redb   │     │  redb   │     │  redb   │              │
-│   │(primary)│     │(replica)│     │(replica)│              │
-│   └─────────┘     └─────────┘     └─────────┘              │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-```
+<Mermaid>
+{`flowchart TB
+    subgraph Cluster["ReasonDB Cluster"]
+        direction TB
+        
+        subgraph Nodes["Raft Consensus Layer"]
+            direction LR
+            N1["🟢 Node 1<br/>LEADER"]
+            N2["⚪ Node 2<br/>FOLLOWER"]
+            N3["⚪ Node 3<br/>FOLLOWER"]
+            N1 <--> N2
+            N2 <--> N3
+            N1 <--> N3
+        end
+        
+        subgraph Storage["Storage Layer"]
+            direction LR
+            D1[(redb<br/>primary)]
+            D2[(redb<br/>replica)]
+            D3[(redb<br/>replica)]
+        end
+        
+        N1 --> D1
+        N2 --> D2
+        N3 --> D3
+    end
+    
+    Client([Client]) --> N1
+    Client -.->|reads| N2
+    Client -.->|reads| N3`}
+</Mermaid>
 
 ### Key Features
 
