@@ -8,7 +8,8 @@ import {
 } from '@tanstack/react-table'
 import { FilterBuilder } from '@/components/search'
 import { JsonDetailSidebar } from '../JsonDetailSidebar'
-import { createClient } from '@/lib/api'
+import { NodeViewerSidebar } from '@/components/shared/NodeViewerSidebar'
+import { createClient, type TreeNode } from '@/lib/api'
 import type { Document } from '@/stores/tableStore'
 import {
   Dialog,
@@ -52,6 +53,12 @@ export function DocumentViewer({ tableId }: DocumentViewerProps) {
   const [selectedCell, setSelectedCell] = useState<SelectedCellData | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Document | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  
+  // Node viewer sidebar state
+  const [nodeViewerOpen, setNodeViewerOpen] = useState(false)
+  const [nodeViewerTitle, setNodeViewerTitle] = useState('')
+  const [nodeViewerTree, setNodeViewerTree] = useState<TreeNode | null>(null)
+  const [nodeViewerLoading, setNodeViewerLoading] = useState(false)
 
   // Hooks
   const {
@@ -70,18 +77,16 @@ export function DocumentViewer({ tableId }: DocumentViewerProps) {
   
   const { filteredDocuments, isFiltered } = useDocumentFilter(documents)
 
-  // Load document content (tree structure)
+  // Load document content (tree structure) - opens in dedicated Node Viewer
   const handleLoadContent = useCallback(
     async (documentId: string, documentTitle: string) => {
       if (!activeConnection) return
 
-      // Show loading state
-      setSelectedCell({
-        title: `${documentTitle} → content`,
-        path: 'document tree',
-        data: { loading: true },
-        isLoading: true,
-      })
+      // Open the node viewer sidebar with loading state
+      setNodeViewerTitle(documentTitle)
+      setNodeViewerTree(null)
+      setNodeViewerLoading(true)
+      setNodeViewerOpen(true)
 
       try {
         const client = createClient({
@@ -92,19 +97,12 @@ export function DocumentViewer({ tableId }: DocumentViewerProps) {
         })
 
         const tree = await client.getDocumentTree(documentId)
-        
-        setSelectedCell({
-          title: `${documentTitle} → content`,
-          path: 'document tree',
-          data: tree,
-        })
+        setNodeViewerTree(tree)
       } catch (error) {
         console.error('Failed to load document tree:', error)
-        setSelectedCell({
-          title: `${documentTitle} → content`,
-          path: 'document tree',
-          data: { error: error instanceof Error ? error.message : 'Failed to load' },
-        })
+        // Keep sidebar open to show error state
+      } finally {
+        setNodeViewerLoading(false)
       }
     },
     [activeConnection]
@@ -274,7 +272,7 @@ export function DocumentViewer({ tableId }: DocumentViewerProps) {
         )}
       </div>
 
-      {/* JSON Detail Sidebar - always render for animation */}
+      {/* JSON Detail Sidebar - for metadata and document viewing */}
       <JsonDetailSidebar
         isOpen={selectedCell !== null}
         onClose={() => setSelectedCell(null)}
@@ -282,6 +280,15 @@ export function DocumentViewer({ tableId }: DocumentViewerProps) {
         path={selectedCell?.path}
         data={selectedCell?.data}
         isLoading={selectedCell?.isLoading}
+      />
+
+      {/* Node Viewer Sidebar - for viewing document tree structure */}
+      <NodeViewerSidebar
+        isOpen={nodeViewerOpen}
+        onClose={() => setNodeViewerOpen(false)}
+        title={nodeViewerTitle}
+        treeData={nodeViewerTree ?? undefined}
+        isLoading={nodeViewerLoading}
       />
 
       {/* Delete Confirmation Dialog */}

@@ -292,13 +292,13 @@ export function JsonDetailSidebar({ isOpen, onClose, title, data, path, isLoadin
                 typeof data === 'number' ? 'bg-peach/20 text-peach' :
                 'bg-overlay-0/20 text-overlay-1'
               )}>
-                {Array.isArray(data) ? `array[${data.length}]` : typeof data}
+                {Array.isArray(data) ? `array[${(data as unknown[]).length}]` : typeof data}
               </span>
               {typeof data === 'object' && data !== null && !Array.isArray(data) && (
                 <>
                   <span className="text-overlay-0">•</span>
                   <span className="text-overlay-0">
-                    {Object.keys(data).length} keys
+                    {Object.keys(data as Record<string, unknown>).length} keys
                   </span>
                 </>
               )}

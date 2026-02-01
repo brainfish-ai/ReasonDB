@@ -318,6 +318,7 @@ export interface TreeNode {
   id: string
   title: string
   summary: string
+  content?: string  // Original content (only present for leaf nodes)
   depth: number
   is_leaf: boolean
   children: TreeNode[]

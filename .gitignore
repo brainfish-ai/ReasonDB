@@ -46,3 +46,4 @@ logs/
 # Build artifacts
 dist/
 docs/node_modules/
+docs/.devdoc.json

@@ -155,6 +155,10 @@ pub struct TreeNode {
     /// LLM-generated summary
     #[schema(example = "This chapter covers neural network fundamentals...")]
     pub summary: String,
+    /// Original content (only present for leaf nodes)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = "Neural networks are computing systems inspired by biological neural networks...")]
+    pub content: Option<String>,
     /// Depth in the tree (0 = root)
     #[schema(example = 1)]
     pub depth: u8,
@@ -399,6 +403,7 @@ pub async fn get_document_tree<R: ReasoningEngine + Send + Sync + 'static>(
             id: node.id,
             title: node.title,
             summary: node.summary,
+            content: node.content,
             depth: node.depth,
             is_leaf,
             children,
