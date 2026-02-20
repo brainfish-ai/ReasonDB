@@ -5,6 +5,7 @@ members = [
     "crates/reasondb-ingest",
     "crates/reasondb-server",
     "crates/reasondb-cli",
+    "apps/reasondb-client/src-tauri",
 ]
 
 [workspace.package]

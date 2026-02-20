@@ -1,0 +1,26 @@
+services:
+  reasondb:
+    build: .
+    image: reasondb/reasondb:latest
+    ports:
+      - "4444:4444"
+    volumes:
+      - reasondb_data:/data
+    environment:
+      REASONDB_HOST: "0.0.0.0"
+      REASONDB_PORT: "4444"
+      REASONDB_PATH: "/data/reasondb.redb"
+      # Uncomment and set an LLM key to enable AI reasoning capabilities.
+      # Without a key the server starts with a mock reasoner.
+      # OPENAI_API_KEY: ""
+      # ANTHROPIC_API_KEY: ""
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4444/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  reasondb_data:
