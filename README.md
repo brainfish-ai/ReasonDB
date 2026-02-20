@@ -99,6 +99,42 @@ reasondb serve
 
 Server starts at **http://localhost:4444** with Swagger UI at **http://localhost:4444/swagger-ui/**
 
+### Docker (Local Testing)
+
+```bash
+# Build the image and start the container
+docker compose up --build
+
+# Run in detached (background) mode
+docker compose up --build -d
+
+# View logs when running detached
+docker compose logs -f
+
+# Stop the running containers
+docker compose down
+
+# Stop and remove the persisted data volume
+docker compose down -v
+
+# Rebuild from scratch (no cache)
+docker compose build --no-cache
+
+# Check container health status
+docker compose ps
+```
+
+To pass an LLM API key, either export it as an environment variable or create a `.env` file in the project root:
+
+```bash
+# Option 1: export before running
+OPENAI_API_KEY=sk-... docker compose up --build
+
+# Option 2: create a .env file (git-ignored)
+echo 'OPENAI_API_KEY=sk-...' > .env
+docker compose up --build
+```
+
 ### Your First Search
 
 ```bash
@@ -123,28 +159,31 @@ curl -X POST http://localhost:4444/v1/search \
 
 ## How It Works
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         ReasonDB                             │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│   📄 Documents → Parse & Chunk → 🌳 Build Tree → ✨ Summarize │
-│                                                              │
-│                          ↓                                   │
-│                                                              │
-│   ❓ Question → 🧠 LLM Navigates Tree → 🎯 Extract Answer     │
-│                                                              │
-│                          ↓                                   │
-│                                                              │
-│   ✅ Answer + Confidence Score + Reasoning Path              │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Ingestion["Ingestion Pipeline"]
+        A["Documents"] -->|Parse & Chunk| B["Build Hierarchical Tree"]
+        B -->|Bottom-up| C["LLM Summarizes Each Node"]
+    end
+
+    subgraph Search["Search & Reasoning"]
+        D["Natural Language Query"] --> E["LLM Reads Root Summary"]
+        E -->|Selects relevant branches| F["Traverse Tree"]
+        F -->|Parallel beam search| G["Drill Into Leaf Nodes"]
+    end
+
+    subgraph Result["Response"]
+        G --> H["Extract Answer"]
+        H --> I["Confidence Score + Reasoning Path"]
+    end
+
+    Ingestion --> Search
 ```
 
-1. **Ingest**: Documents are parsed and converted into hierarchical trees
-2. **Summarize**: LLM generates summaries for each node (bottom-up)
-3. **Search**: LLM traverses tree, choosing branches based on summaries
-4. **Return**: Relevant content with extracted answers and confidence scores
+1. **Ingest** — Documents are parsed and converted into hierarchical trees
+2. **Summarize** — LLM generates summaries for each node (bottom-up)
+3. **Search** — LLM traverses the tree, choosing branches based on summaries via parallel beam search
+4. **Return** — Relevant content with extracted answers, confidence scores, and the full reasoning path
 
 ## Built for Production
 
