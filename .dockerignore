@@ -1,0 +1,14 @@
+target/
+apps/
+docs/
+monitoring/
+assets/
+data/
+.git/
+.github/
+.cursor/
+node_modules/
+
+*.md
+!Cargo.toml
+!Cargo.lock
