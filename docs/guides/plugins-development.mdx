@@ -1,0 +1,265 @@
+---
+title: "Developing Plugins"
+description: "Build custom ReasonDB plugins with step-by-step examples in Python, Node.js, and Bash"
+---
+
+This guide walks you through building, testing, and installing custom plugins for ReasonDB. By the end, you'll have a working plugin that slots into the ingestion pipeline.
+
+## Writing an Extractor Plugin
+
+Extractors convert files or URLs into markdown. This is the most common plugin type.
+
+<Steps>
+  <Step title="Create a directory">
+
+```bash
+mkdir -p plugins/my-extractor
+```
+
+  </Step>
+  <Step title="Add a plugin.toml manifest">
+
+```toml title="plugins/my-extractor/plugin.toml"
+[plugin]
+name = "my-extractor"
+version = "1.0.0"
+description = "My custom extractor"
+author = "Me"
+license = "MIT"
+
+[plugin.runner]
+command = "python3"
+args = ["extract.py"]
+
+[plugin.capabilities]
+kind = "extractor"
+formats = ["custom-format"]
+priority = 300
+```
+
+  </Step>
+  <Step title="Implement the script">
+    Your script reads JSON from stdin and writes JSON to stdout:
+
+```python title="plugins/my-extractor/extract.py"
+import json, sys, os
+
+def main():
+    request = json.loads(sys.stdin.read())
+
+    if request.get("operation") != "extract":
+        json.dump({"version": 1, "status": "error",
+                    "error": "Only extract is supported"}, sys.stdout)
+        return
+
+    path = request.get("params", {}).get("path", "")
+    if not path or not os.path.isfile(path):
+        json.dump({"version": 1, "status": "error",
+                    "error": f"File not found: {path}"}, sys.stdout)
+        return
+
+    with open(path, "r") as f:
+        content = f.read()
+
+    title = os.path.splitext(os.path.basename(path))[0]
+    json.dump({
+        "version": 1,
+        "status": "ok",
+        "result": {
+            "title": title,
+            "markdown": content,
+            "metadata": {},
+        },
+    }, sys.stdout)
+
+if __name__ == "__main__":
+    main()
+```
+
+  </Step>
+  <Step title="Test locally">
+
+```bash
+echo '{"version":1,"operation":"extract","params":{"source_type":"file","path":"README.md"}}' \
+  | python3 plugins/my-extractor/extract.py
+```
+
+You should see a JSON response with `"status": "ok"`.
+
+  </Step>
+  <Step title="Test via the API">
+    Restart ReasonDB to discover the new plugin, then test it through the API:
+
+```bash
+curl http://localhost:4444/v1/plugins
+```
+
+```bash
+curl -X POST http://localhost:4444/v1/plugins/my-extractor/test \
+  -H "Content-Type: application/json" \
+  -d '{"operation":"extract","params":{"source_type":"file","path":"/tmp/test.custom-format"}}'
+```
+
+  </Step>
+</Steps>
+
+## Example: Node.js Post-Processor
+
+A post-processor receives extracted markdown and transforms it before chunking. This is useful for cleaning up messy HTML-to-markdown conversions or standardizing heading styles.
+
+```javascript title="plugins/my-processor/process.js"
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => (input += chunk));
+process.stdin.on("end", () => {
+  try {
+    const request = JSON.parse(input);
+    const { markdown = "" } = request.params || {};
+
+    // Strip HTML comments, normalize whitespace
+    let processed = markdown.replace(/<!--[\s\S]*?-->/g, "");
+    processed = processed.replace(/\n{3,}/g, "\n\n");
+
+    process.stdout.write(JSON.stringify({
+      version: 1,
+      status: "ok",
+      result: { markdown: processed, metadata: {} },
+    }));
+  } catch (err) {
+    process.stdout.write(JSON.stringify({
+      version: 1, status: "error", error: err.message,
+    }));
+  }
+});
+```
+
+```toml title="plugins/my-processor/plugin.toml"
+[plugin]
+name = "my-processor"
+version = "1.0.0"
+description = "Clean up markdown before chunking"
+author = "Me"
+license = "MIT"
+
+[plugin.runner]
+command = "node"
+args = ["process.js"]
+
+[plugin.capabilities]
+kind = "post_processor"
+priority = 100
+```
+
+## Example: Bash Extractor
+
+For simple formats, a Bash script works well:
+
+```bash title="plugins/csv-extractor/extract.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+
+INPUT=$(cat)
+PATH_VAL=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('params',{}).get('path',''))")
+
+if [ ! -f "$PATH_VAL" ]; then
+  echo '{"version":1,"status":"error","error":"File not found"}'
+  exit 0
+fi
+
+FILENAME=$(basename "$PATH_VAL" .csv)
+CONTENT=$(cat "$PATH_VAL")
+
+cat <<EOF
+{"version":1,"status":"ok","result":{"title":"$FILENAME","markdown":"$CONTENT","metadata":{}}}
+EOF
+```
+
+```toml title="plugins/csv-extractor/plugin.toml"
+[plugin]
+name = "csv-extractor"
+version = "1.0.0"
+description = "Simple CSV to markdown extractor"
+author = "Me"
+
+[plugin.runner]
+command = "bash"
+args = ["extract.sh"]
+
+[plugin.capabilities]
+kind = "extractor"
+formats = ["csv"]
+priority = 250
+```
+
+## Installing Plugins
+
+### Local Installation
+
+Copy the plugin directory into the plugins folder:
+
+```bash
+cp -r my-plugin/ ./plugins/
+```
+
+Set a custom location with:
+
+```bash
+export REASONDB_PLUGINS_DIR=/path/to/plugins
+```
+
+### Docker
+
+In Docker, plugins in `./plugins/` are automatically mounted into the container. During development, `docker compose watch` hot-reloads plugin changes:
+
+```bash
+docker compose watch
+```
+
+<Tip>
+Plugin changes (new files, code edits) are synced into the running container automatically. The plugin is re-discovered on the next ingestion request — no server restart needed during development.
+</Tip>
+
+### Verify Installation
+
+After installing, check that the plugin was discovered:
+
+```bash
+curl http://localhost:4444/v1/plugins
+```
+
+Look for your plugin in the response list. If it's missing, check the server logs for load errors.
+
+## Debugging Tips
+
+<AccordionGroup>
+  <Accordion title="Plugin not discovered">
+    - Verify the directory is inside `$REASONDB_PLUGINS_DIR` (default: `./plugins/`)
+    - Check that `plugin.toml` exists and is valid TOML
+    - Look at server startup logs for parse errors
+    - Ensure `command` uses an allowed runtime (`python3`, `node`, `bash`, or a binary path)
+  </Accordion>
+  <Accordion title="Plugin returns error">
+    - Test the plugin manually: pipe JSON into stdin and check stdout
+    - Make sure nothing else writes to stdout (use stderr for logging)
+    - Check the timeout — large files may need `timeout_secs` increased
+  </Accordion>
+  <Accordion title="Plugin works locally but not in Docker">
+    - Check that dependencies are installed in the container
+    - For Python plugins, add a `requirements.txt` and install in a custom Dockerfile layer
+    - Verify file paths — Docker paths differ from host paths
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Plugin Protocol" icon="code" href="/guides/plugins-protocol">
+    Full protocol specification and manifest reference
+  </Card>
+  <Card title="Plugin Overview" icon="puzzle-piece" href="/guides/plugins">
+    Architecture, types, and configuration
+  </Card>
+  <Card title="Ingestion Guide" icon="file-arrow-up" href="/guides/ingestion">
+    How plugins fit into the ingestion pipeline
+  </Card>
+</CardGroup>

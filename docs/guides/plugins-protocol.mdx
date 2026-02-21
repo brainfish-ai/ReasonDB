@@ -1,0 +1,232 @@
+---
+title: "Plugin Protocol"
+description: "JSON protocol specification and manifest format for ReasonDB plugins"
+---
+
+Plugins communicate with ReasonDB via a simple JSON protocol over stdin/stdout. This page covers the request/response format and the `plugin.toml` manifest that declares a plugin's capabilities.
+
+## How It Works
+
+1. ReasonDB spawns the plugin as a child process
+2. Sends a JSON request to the plugin's **stdin**
+3. Reads a JSON response from the plugin's **stdout**
+4. The plugin exits after handling one request (one-shot model)
+
+<Warning>
+Plugins must not write anything to stdout except the JSON response. Use stderr for logging.
+</Warning>
+
+## Request Format
+
+Every request sent to a plugin follows this shape:
+
+```json
+{
+  "version": 1,
+  "operation": "extract",
+  "params": {
+    "source_type": "file",
+    "path": "/tmp/document.pdf",
+    "config": {}
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | int | Protocol version (always `1`) |
+| `operation` | string | Operation to perform (matches plugin type) |
+| `params` | object | Operation-specific parameters |
+| `params.config` | object | Optional user-provided configuration |
+
+### Operation Parameters
+
+Each plugin type receives different parameters:
+
+<Tabs>
+  <Tab title="Extractor">
+
+```json
+{
+  "operation": "extract",
+  "params": {
+    "source_type": "file",
+    "path": "/tmp/document.pdf",
+    "config": {}
+  }
+}
+```
+
+| Param | Description |
+|-------|-------------|
+| `source_type` | `"file"` or `"url"` |
+| `path` | File path (when `source_type` is `"file"`) |
+| `url` | URL to fetch (when `source_type` is `"url"`) |
+
+  </Tab>
+  <Tab title="Post-Processor">
+
+```json
+{
+  "operation": "process",
+  "params": {
+    "markdown": "# Document\n\nContent...",
+    "config": {}
+  }
+}
+```
+
+| Param | Description |
+|-------|-------------|
+| `markdown` | The extracted markdown to transform |
+
+  </Tab>
+  <Tab title="Chunker">
+
+```json
+{
+  "operation": "chunk",
+  "params": {
+    "markdown": "# Document\n\nContent...",
+    "config": {}
+  }
+}
+```
+
+| Param | Description |
+|-------|-------------|
+| `markdown` | The markdown to split into chunks |
+
+  </Tab>
+  <Tab title="Summarizer">
+
+```json
+{
+  "operation": "summarize",
+  "params": {
+    "content": "Section content to summarize...",
+    "config": {}
+  }
+}
+```
+
+| Param | Description |
+|-------|-------------|
+| `content` | The text content to summarize |
+
+  </Tab>
+</Tabs>
+
+## Response Format
+
+### Success
+
+```json
+{
+  "version": 1,
+  "status": "ok",
+  "result": {
+    "title": "My Document",
+    "markdown": "# Content...",
+    "metadata": {}
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | int | Protocol version (always `1`) |
+| `status` | string | `"ok"` for success |
+| `result` | object | Operation-specific result |
+| `result.metadata` | object | Optional metadata to attach to the document |
+
+### Error
+
+```json
+{
+  "version": 1,
+  "status": "error",
+  "error": "Description of what went wrong"
+}
+```
+
+Return `"status": "error"` with a human-readable error message. ReasonDB will log the error and try the next plugin (if one exists for the same format).
+
+## Manifest Format
+
+Every plugin needs a `plugin.toml` in its directory. This is how ReasonDB discovers and configures plugins.
+
+```toml
+[plugin]
+name = "my-plugin"
+version = "1.0.0"
+description = "What this plugin does"
+author = "Your Name"
+license = "MIT"
+
+[plugin.runner]
+command = "python3"          # runtime to use
+args = ["my_script.py"]     # arguments passed to command
+timeout_secs = 60           # max execution time (default: 120)
+
+[plugin.capabilities]
+kind = "extractor"           # plugin type
+formats = ["pdf", "docx"]   # file formats handled (extractor only)
+handles_urls = true          # can handle URLs? (extractor only)
+url_patterns = ["*"]         # URL patterns to match (extractor only)
+priority = 100               # higher number = tried first
+```
+
+### `[plugin]` — Metadata
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Unique plugin name |
+| `version` | Yes | Semantic version |
+| `description` | Yes | Short description |
+| `author` | No | Author name |
+| `license` | No | License identifier |
+
+### `[plugin.runner]` — Execution
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `command` | Yes | — | Runtime command (`python3`, `node`, `bash`, or binary path) |
+| `args` | Yes | — | Arguments passed to the command |
+| `timeout_secs` | No | `120` | Maximum execution time before the process is killed |
+
+### `[plugin.capabilities]` — What It Does
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `kind` | Yes | Plugin type: `extractor`, `post_processor`, `chunker`, `summarizer`, `formatter` |
+| `formats` | Extractor only | Array of file extensions this plugin handles |
+| `handles_urls` | Extractor only | Whether the plugin can handle URL sources |
+| `url_patterns` | Extractor only | Glob patterns for matching URLs (e.g., `["*.youtube.com/*"]`) |
+| `priority` | No | Higher number = tried first (default: `100`) |
+
+## Priority and Fallback
+
+When multiple plugins handle the same file format or URL pattern, ReasonDB picks the one with the **highest priority**. If that plugin returns an error, the next-highest plugin is tried automatically.
+
+```
+Request: extract "report.pdf"
+
+→ my-pdf-extractor (priority 300) — tried first
+  ✗ returns error
+→ markitdown (priority 200) — fallback
+  ✓ returns markdown
+```
+
+The built-in `markitdown` plugin has priority `200`. Set your custom plugin's priority above `200` to override it for specific formats, or below `200` to use it as a fallback.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Developing Plugins" icon="wrench" href="/guides/plugins-development">
+    Build your own plugins with step-by-step examples
+  </Card>
+  <Card title="Plugin Overview" icon="puzzle-piece" href="/guides/plugins">
+    Architecture, types, and configuration
+  </Card>
+</CardGroup>
