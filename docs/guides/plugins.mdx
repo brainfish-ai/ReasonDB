@@ -1,6 +1,6 @@
 ---
-title: "Plugins"
-description: "Extend ReasonDB with community plugins for document extraction, post-processing, chunking, summarization, and formatting."
+title: "Plugin Overview"
+description: "Understand ReasonDB's plugin architecture for document extraction, post-processing, chunking, summarization, and formatting."
 ---
 
 ReasonDB uses a **plugin architecture** for document ingestion. Every pipeline stage — from extracting PDFs to summarizing content — is handled by plugins that communicate via JSON over stdin/stdout.
@@ -35,6 +35,16 @@ Each plugin is an **external process** that:
 4. Writes a JSON response to **stdout**
 5. Exits after handling one request (one-shot model)
 
+## Plugin Types
+
+| Type | Operation | Description |
+|------|-----------|-------------|
+| `extractor` | `extract` | Convert files or URLs to markdown |
+| `post_processor` | `process` | Transform markdown before chunking |
+| `chunker` | `chunk` | Split markdown into chunks |
+| `summarizer` | `summarize` | Generate summaries for content |
+| `formatter` | `format` | Format output nodes |
+
 ## Supported Runtimes
 
 Plugins must use one of these runtimes. Other interpreters are rejected at load time to keep the Docker image lean.
@@ -46,16 +56,6 @@ Plugins must use one of these runtimes. Other interpreters are rejected at load 
 | Bash | `bash` or `sh` | Included in Docker image |
 | Compiled binary | `./my-binary` or `/abs/path` | Build with Rust, Go, C, etc. and ship the binary |
 
-## Plugin Types
-
-| Type | Operation | Description |
-|------|-----------|-------------|
-| `extractor` | `extract` | Convert files or URLs to markdown |
-| `post_processor` | `process` | Transform markdown before chunking |
-| `chunker` | `chunk` | Split markdown into chunks |
-| `summarizer` | `summarize` | Generate summaries for content |
-| `formatter` | `format` | Format output nodes |
-
 ## Built-in Plugin: MarkItDown
 
 ReasonDB ships with the `markitdown` plugin which wraps [Microsoft MarkItDown](https://github.com/microsoft/markitdown). It handles:
@@ -66,222 +66,7 @@ ReasonDB ships with the `markitdown` plugin which wraps [Microsoft MarkItDown](h
 - **Media**: Images (OCR), Audio (transcription)
 - **Archives**: ZIP, EPUB, Outlook (.msg/.eml)
 
-No configuration needed — it's auto-discovered on startup.
-
-## Protocol
-
-### Request (stdin)
-
-```json
-{
-  "version": 1,
-  "operation": "extract",
-  "params": {
-    "source_type": "file",
-    "path": "/tmp/document.pdf",
-    "config": {}
-  }
-}
-```
-
-### Success Response (stdout)
-
-```json
-{
-  "version": 1,
-  "status": "ok",
-  "result": {
-    "title": "My Document",
-    "markdown": "# Content...",
-    "metadata": {}
-  }
-}
-```
-
-### Error Response (stdout)
-
-```json
-{
-  "version": 1,
-  "status": "error",
-  "error": "Description of what went wrong"
-}
-```
-
-## Manifest Format
-
-Every plugin needs a `plugin.toml` in its directory:
-
-```toml
-[plugin]
-name = "my-plugin"
-version = "1.0.0"
-description = "What this plugin does"
-author = "Your Name"
-license = "MIT"
-
-[plugin.runner]
-command = "python3"          # runtime to use
-args = ["my_script.py"]     # arguments passed to command
-timeout_secs = 60           # max execution time (default: 120)
-
-[plugin.capabilities]
-kind = "extractor"           # plugin type (see table above)
-formats = ["pdf", "docx"]   # file formats handled (extractor only)
-handles_urls = true          # can handle URLs? (extractor only)
-url_patterns = ["*"]         # URL patterns to match (extractor only)
-priority = 100               # higher number = tried first
-```
-
-### Priority
-
-When multiple plugins handle the same format, the one with the **higher priority** wins. If it fails, the next plugin is tried. The built-in `markitdown` plugin has priority `200`.
-
-## Writing a Plugin
-
-<Steps>
-  <Step title="Create a directory">
-    ```bash
-    mkdir -p plugins/my-extractor
-    ```
-  </Step>
-  <Step title="Add a plugin.toml manifest">
-    ```toml title="plugins/my-extractor/plugin.toml"
-    [plugin]
-    name = "my-extractor"
-    version = "1.0.0"
-    description = "My custom extractor"
-    author = "Me"
-    license = "MIT"
-
-    [plugin.runner]
-    command = "python3"
-    args = ["extract.py"]
-
-    [plugin.capabilities]
-    kind = "extractor"
-    formats = ["custom-format"]
-    priority = 300
-    ```
-  </Step>
-  <Step title="Implement the script">
-    Your script reads JSON from stdin and writes JSON to stdout:
-
-    ```python title="plugins/my-extractor/extract.py"
-    import json, sys, os
-
-    def main():
-        request = json.loads(sys.stdin.read())
-
-        if request.get("operation") != "extract":
-            json.dump({"version": 1, "status": "error",
-                        "error": "Only extract is supported"}, sys.stdout)
-            return
-
-        path = request.get("params", {}).get("path", "")
-        if not path or not os.path.isfile(path):
-            json.dump({"version": 1, "status": "error",
-                        "error": f"File not found: {path}"}, sys.stdout)
-            return
-
-        with open(path, "r") as f:
-            content = f.read()
-
-        title = os.path.splitext(os.path.basename(path))[0]
-        json.dump({
-            "version": 1,
-            "status": "ok",
-            "result": {
-                "title": title,
-                "markdown": content,
-                "metadata": {},
-            },
-        }, sys.stdout)
-
-    if __name__ == "__main__":
-        main()
-    ```
-  </Step>
-  <Step title="Test it">
-    ```bash
-    echo '{"version":1,"operation":"extract","params":{"source_type":"file","path":"README.md"}}' \
-      | python3 plugins/my-extractor/extract.py
-    ```
-  </Step>
-  <Step title="Restart ReasonDB">
-    Plugins are discovered on startup. Restart the server and check the logs:
-
-    ```
-    INFO reasondb_server: Discovered 2 plugins
-    ```
-
-    Or query the API:
-
-    ```bash
-    curl http://localhost:4444/v1/plugins
-    ```
-  </Step>
-</Steps>
-
-## Example: Node.js Post-Processor
-
-A post-processor receives extracted markdown and transforms it before chunking.
-
-```javascript title="plugins/my-processor/process.js"
-let input = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk) => (input += chunk));
-process.stdin.on("end", () => {
-  try {
-    const request = JSON.parse(input);
-    const { markdown = "" } = request.params || {};
-
-    // Strip HTML comments, normalize whitespace
-    let processed = markdown.replace(/<!--[\s\S]*?-->/g, "");
-    processed = processed.replace(/\n{3,}/g, "\n\n");
-
-    process.stdout.write(JSON.stringify({
-      version: 1,
-      status: "ok",
-      result: { markdown: processed, metadata: {} },
-    }));
-  } catch (err) {
-    process.stdout.write(JSON.stringify({
-      version: 1, status: "error", error: err.message,
-    }));
-  }
-});
-```
-
-```toml title="plugins/my-processor/plugin.toml"
-[plugin]
-name = "my-processor"
-version = "1.0.0"
-description = "Clean up markdown before chunking"
-author = "Me"
-license = "MIT"
-
-[plugin.runner]
-command = "node"
-args = ["process.js"]
-
-[plugin.capabilities]
-kind = "post_processor"
-priority = 100
-```
-
-## Installation
-
-Copy a plugin directory into the plugins folder:
-
-```bash
-cp -r my-plugin/ ./plugins/
-
-# Or set a custom location
-export REASONDB_PLUGINS_DIR=/path/to/plugins
-```
-
-In Docker, plugins in `./plugins/` are automatically mounted and hot-reloaded during development via `docker compose watch`.
+No configuration needed — it's auto-discovered on startup. The `markitdown` plugin has priority `200`, so any custom extractor with a higher priority will take precedence for shared formats.
 
 ## Configuration
 
@@ -298,3 +83,18 @@ In Docker, plugins in `./plugins/` are automatically mounted and hot-reloaded du
 | `GET` | `/v1/plugins` | List all discovered plugins |
 | `GET` | `/v1/plugins/:name` | Get details for a specific plugin |
 | `POST` | `/v1/plugins/:name/test` | Test a plugin with arbitrary input |
+
+```bash
+curl http://localhost:4444/v1/plugins
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Plugin Protocol" icon="code" href="/guides/plugins-protocol">
+    JSON protocol, manifest format, and request/response shapes
+  </Card>
+  <Card title="Developing Plugins" icon="wrench" href="/guides/plugins-development">
+    Build your own plugins with step-by-step examples
+  </Card>
+</CardGroup>
