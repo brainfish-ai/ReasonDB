@@ -4,10 +4,12 @@ import {
   Star,
   Plus,
   CaretLeft,
+  Gear,
 } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
 import { useConnectionStore, type Connection } from '@/stores/connectionStore'
 import { useUiStore } from '@/stores/uiStore'
+import { useTabsStore } from '@/stores/tabsStore'
 import { ConnectionList } from '@/components/connection/ConnectionList'
 import { ConnectionForm } from '@/components/connection/ConnectionForm'
 import { TableBrowser } from '@/components/table/TableBrowser'
@@ -65,6 +67,17 @@ export function Sidebar() {
   const handleNewConnection = () => {
     setEditingConnection(undefined)
     setShowConnectionForm(true)
+  }
+
+  const { tabs, addTab, setActiveTab } = useTabsStore()
+
+  const openSettingsTab = () => {
+    const existing = tabs.find((t) => t.type === 'settings')
+    if (existing) {
+      setActiveTab(existing.id)
+    } else {
+      addTab({ title: 'Agent Settings', type: 'settings' })
+    }
   }
 
   return (
@@ -135,6 +148,18 @@ export function Sidebar() {
           <Star size={16} weight="duotone" aria-hidden="true" />
           Saved Queries
         </button>
+        {activeConnectionId && (
+          <button
+            onClick={openSettingsTab}
+            className={cn(
+              'w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md',
+              'text-subtext-1 hover:text-text hover:bg-surface-0 transition-colors'
+            )}
+          >
+            <Gear size={16} weight="duotone" aria-hidden="true" />
+            Agent Settings
+          </button>
+        )}
       </div>
 
       <ConnectionForm

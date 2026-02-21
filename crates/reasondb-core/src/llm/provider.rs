@@ -204,6 +204,7 @@ impl LLMProvider {
 pub struct Reasoner {
     provider: LLMProvider,
     config: ReasoningConfig,
+    options: super::config::LlmOptions,
 }
 
 impl Reasoner {
@@ -212,6 +213,7 @@ impl Reasoner {
         Self {
             provider,
             config: ReasoningConfig::default(),
+            options: super::config::LlmOptions::default(),
         }
     }
 
@@ -219,6 +221,45 @@ impl Reasoner {
     pub fn with_config(mut self, config: ReasoningConfig) -> Self {
         self.config = config;
         self
+    }
+
+    /// Set LLM options (temperature, max_tokens, etc.)
+    pub fn with_options(mut self, options: super::config::LlmOptions) -> Self {
+        self.options = options;
+        self
+    }
+
+    /// Build `additional_params` JSON from options (top_p, penalties, disable_thinking).
+    fn additional_params_json(&self) -> Option<serde_json::Value> {
+        let mut map = serde_json::Map::new();
+        if let Some(top_p) = self.options.top_p {
+            map.insert("top_p".into(), serde_json::json!(top_p));
+        }
+        if let Some(fp) = self.options.frequency_penalty {
+            map.insert("frequency_penalty".into(), serde_json::json!(fp));
+        }
+        if let Some(pp) = self.options.presence_penalty {
+            map.insert("presence_penalty".into(), serde_json::json!(pp));
+        }
+        if self.options.disable_thinking {
+            map.insert("disable_thinking".into(), serde_json::json!(true));
+        }
+        if map.is_empty() { None } else { Some(serde_json::Value::Object(map)) }
+    }
+
+    /// Get the effective preamble: options override, or fallback to the provided default.
+    fn effective_preamble<'a>(&'a self, default: &'a str) -> &'a str {
+        self.options.system_prompt.as_deref().unwrap_or(default)
+    }
+
+    /// Get effective max_tokens (options override or given default).
+    fn effective_max_tokens(&self, default: u64) -> u64 {
+        self.options.max_tokens.unwrap_or(default)
+    }
+
+    /// Get effective temperature as f64.
+    fn effective_temperature(&self) -> Option<f64> {
+        self.options.temperature.map(|t| t as f64)
     }
 
     /// Format candidates for the prompt
@@ -252,23 +293,26 @@ impl Reasoner {
         match &self.provider {
             LLMProvider::OpenAI { api_key, model } => {
                 let client = rig::providers::openai::Client::new(api_key);
-                let extractor = client.extractor::<T>(model).build();
+                let mut builder = client.extractor::<T>(model);
+                if let Some(preamble) = &self.options.system_prompt {
+                    builder = builder.preamble(preamble);
+                }
+                let extractor = builder.build();
 
                 extractor.extract(prompt).await.map_err(|e| {
                     ReasonError::Reasoning(format!("OpenAI extraction error: {}", e))
                 })
             }
             LLMProvider::Anthropic { api_key, model } => {
-                // Anthropic requires max_tokens, and extractor doesn't support it
-                // Use agent with JSON output and parse manually
                 let client = rig::providers::anthropic::ClientBuilder::new(api_key).build();
-                let agent = client
+                let default_preamble = "You are a JSON extraction assistant. Always respond with valid JSON only, no other text.";
+                let mut builder = client
                     .agent(model)
-                    .max_tokens(4096)
-                    .preamble("You are a JSON extraction assistant. Always respond with valid JSON only, no other text.")
-                    .build();
+                    .max_tokens(self.effective_max_tokens(4096))
+                    .preamble(self.effective_preamble(default_preamble));
+                builder = self.apply_agent_options(builder);
+                let agent = builder.build();
 
-                // Generate JSON schema for the expected type
                 let schema = schemars::schema_for!(T);
                 let schema_json = serde_json::to_string_pretty(&schema)
                     .map_err(|e| ReasonError::Reasoning(format!("Schema error: {}", e)))?;
@@ -282,7 +326,6 @@ impl Reasoner {
                     ReasonError::Reasoning(format!("Anthropic completion error: {}", e))
                 })?;
 
-                // Strip markdown code blocks if present
                 let json_str = response
                     .trim()
                     .strip_prefix("```json")
@@ -293,14 +336,17 @@ impl Reasoner {
                     .unwrap_or(&response)
                     .trim();
 
-                // Parse the JSON response
                 serde_json::from_str(json_str).map_err(|e| {
                     ReasonError::Reasoning(format!("Failed to parse Anthropic JSON response: {}. Response was: {}", e, json_str))
                 })
             }
             LLMProvider::Gemini { api_key, model } => {
                 let client = rig::providers::gemini::Client::new(api_key);
-                let extractor = client.extractor::<T>(model).build();
+                let mut builder = client.extractor::<T>(model);
+                if let Some(preamble) = &self.options.system_prompt {
+                    builder = builder.preamble(preamble);
+                }
+                let extractor = builder.build();
 
                 extractor.extract(prompt).await.map_err(|e| {
                     ReasonError::Reasoning(format!("Gemini extraction error: {}", e))
@@ -308,7 +354,11 @@ impl Reasoner {
             }
             LLMProvider::Cohere { api_key, model } => {
                 let client = rig::providers::cohere::Client::new(api_key);
-                let extractor = client.extractor::<T>(model).build();
+                let mut builder = client.extractor::<T>(model);
+                if let Some(preamble) = &self.options.system_prompt {
+                    builder = builder.preamble(preamble);
+                }
+                let extractor = builder.build();
 
                 extractor.extract(prompt).await.map_err(|e| {
                     ReasonError::Reasoning(format!("Cohere extraction error: {}", e))
@@ -316,7 +366,11 @@ impl Reasoner {
             }
             LLMProvider::Glm { api_key, model } => {
                 let client = rig::providers::openai::Client::from_url(api_key, "https://open.bigmodel.cn/api/paas/v4");
-                let extractor = client.extractor::<T>(model).build();
+                let mut builder = client.extractor::<T>(model);
+                if let Some(preamble) = &self.options.system_prompt {
+                    builder = builder.preamble(preamble);
+                }
+                let extractor = builder.build();
 
                 extractor.extract(prompt).await.map_err(|e| {
                     ReasonError::Reasoning(format!("GLM extraction error: {}", e))
@@ -324,9 +378,13 @@ impl Reasoner {
             }
             LLMProvider::Kimi { api_key, model } => {
                 let client = rig::providers::openai::Client::from_url(api_key, "https://api.moonshot.ai/v1");
-                let extractor = client.extractor::<T>(model)
-                    .preamble("You are a structured data extraction assistant. Extract the requested information accurately.")
-                    .build();
+                let default_preamble = "You are a structured data extraction assistant. Extract the requested information accurately.";
+                let mut builder = client.extractor::<T>(model)
+                    .preamble(self.effective_preamble(default_preamble));
+                if let Some(preamble) = &self.options.system_prompt {
+                    builder = builder.preamble(preamble);
+                }
+                let extractor = builder.build();
 
                 extractor.extract(prompt).await.map_err(|e| {
                     ReasonError::Reasoning(format!("Kimi extraction error: {}", e))
@@ -334,13 +392,37 @@ impl Reasoner {
             }
             LLMProvider::Ollama { base_url, model } => {
                 let client = rig::providers::openai::Client::from_url("ollama", base_url);
-                let extractor = client.extractor::<T>(model).build();
+                let mut builder = client.extractor::<T>(model);
+                if let Some(preamble) = &self.options.system_prompt {
+                    builder = builder.preamble(preamble);
+                }
+                let extractor = builder.build();
 
                 extractor.extract(prompt).await.map_err(|e| {
                     ReasonError::Reasoning(format!("Ollama extraction error: {}", e))
                 })
             }
         }
+    }
+
+    /// Apply LlmOptions to a rig AgentBuilder.
+    fn apply_agent_options<M: rig::completion::CompletionModel>(
+        &self,
+        mut builder: rig::agent::AgentBuilder<M>,
+    ) -> rig::agent::AgentBuilder<M> {
+        if let Some(temp) = self.effective_temperature() {
+            builder = builder.temperature(temp);
+        }
+        if let Some(max) = self.options.max_tokens {
+            builder = builder.max_tokens(max);
+        }
+        if let Some(preamble) = &self.options.system_prompt {
+            builder = builder.preamble(preamble);
+        }
+        if let Some(params) = self.additional_params_json() {
+            builder = builder.additional_params(params);
+        }
+        builder
     }
 
     /// Execute a simple completion (for summarization)
@@ -353,7 +435,7 @@ impl Reasoner {
         match &self.provider {
             LLMProvider::OpenAI { api_key, model } => {
                 let client = rig::providers::openai::Client::new(api_key);
-                let agent = client.agent(model).build();
+                let agent = self.apply_agent_options(client.agent(model)).build();
 
                 agent.prompt(prompt).await.map_err(|e| {
                     ReasonError::Reasoning(format!("OpenAI completion error: {}", e))
@@ -361,18 +443,19 @@ impl Reasoner {
             }
             LLMProvider::Anthropic { api_key, model } => {
                 let client = rig::providers::anthropic::ClientBuilder::new(api_key).build();
-                let agent = client
+                let mut builder = client
                     .agent(model)
-                    .max_tokens(4096)
-                    .build();
+                    .max_tokens(self.effective_max_tokens(4096));
+                builder = self.apply_agent_options(builder);
 
+                let agent = builder.build();
                 agent.prompt(prompt).await.map_err(|e| {
                     ReasonError::Reasoning(format!("Anthropic completion error: {}", e))
                 })
             }
             LLMProvider::Gemini { api_key, model } => {
                 let client = rig::providers::gemini::Client::new(api_key);
-                let agent = client.agent(model).build();
+                let agent = self.apply_agent_options(client.agent(model)).build();
 
                 agent.prompt(prompt).await.map_err(|e| {
                     ReasonError::Reasoning(format!("Gemini completion error: {}", e))
@@ -380,7 +463,7 @@ impl Reasoner {
             }
             LLMProvider::Cohere { api_key, model } => {
                 let client = rig::providers::cohere::Client::new(api_key);
-                let agent = client.agent(model).build();
+                let agent = self.apply_agent_options(client.agent(model)).build();
 
                 agent.prompt(prompt).await.map_err(|e| {
                     ReasonError::Reasoning(format!("Cohere completion error: {}", e))
@@ -388,7 +471,7 @@ impl Reasoner {
             }
             LLMProvider::Glm { api_key, model } => {
                 let client = rig::providers::openai::Client::from_url(api_key, "https://open.bigmodel.cn/api/paas/v4");
-                let agent = client.agent(model).build();
+                let agent = self.apply_agent_options(client.agent(model)).build();
 
                 agent.prompt(prompt).await.map_err(|e| {
                     ReasonError::Reasoning(format!("GLM completion error: {}", e))
@@ -396,9 +479,11 @@ impl Reasoner {
             }
             LLMProvider::Kimi { api_key, model } => {
                 let client = rig::providers::openai::Client::from_url(api_key, "https://api.moonshot.ai/v1");
-                let agent = client.agent(model)
-                    .preamble("You are a helpful assistant.")
-                    .build();
+                let mut builder = client.agent(model);
+                if self.options.system_prompt.is_none() {
+                    builder = builder.preamble("You are a helpful assistant.");
+                }
+                let agent = self.apply_agent_options(builder).build();
 
                 agent.prompt(prompt).await.map_err(|e| {
                     ReasonError::Reasoning(format!("Kimi completion error: {}", e))
@@ -406,7 +491,7 @@ impl Reasoner {
             }
             LLMProvider::Ollama { base_url, model } => {
                 let client = rig::providers::openai::Client::from_url("ollama", base_url);
-                let agent = client.agent(model).build();
+                let agent = self.apply_agent_options(client.agent(model)).build();
 
                 agent.prompt(prompt).await.map_err(|e| {
                     ReasonError::Reasoning(format!("Ollama completion error: {}", e))

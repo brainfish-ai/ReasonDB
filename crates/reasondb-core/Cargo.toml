@@ -45,6 +45,9 @@ reqwest.workspace = true
 rig-core.workspace = true
 schemars.workspace = true
 
+# Concurrency (hot-swap reasoner)
+arc-swap = "1"
+
 # Clustering
 byteorder.workspace = true
 

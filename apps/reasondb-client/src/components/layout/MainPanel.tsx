@@ -14,6 +14,7 @@ import { QueryEditor } from '@/components/query/QueryEditor'
 import { QueryResults } from '@/components/query/QueryResults'
 import { DocumentViewer } from '@/components/table/DocumentViewer'
 import { JsonViewer } from '@/components/shared/JsonViewer'
+import { AgentSettings } from '@/components/settings/AgentSettings'
 import { useQueryStore } from '@/stores/queryStore'
 import { useTableStore } from '@/stores/tableStore'
 import { useUiStore } from '@/stores/uiStore'
@@ -143,6 +144,13 @@ export function MainPanel() {
                     className={cn('shrink-0 mr-2', isActive ? 'text-green' : 'text-overlay-0')} 
                     aria-hidden="true"
                   />
+                ) : tab.type === 'settings' ? (
+                  <Code 
+                    size={14} 
+                    weight={isActive ? 'fill' : 'regular'} 
+                    className={cn('shrink-0 mr-2', isActive ? 'text-peach' : 'text-overlay-0')} 
+                    aria-hidden="true"
+                  />
                 ) : (
                   <FileCode 
                     size={14} 
@@ -208,6 +216,15 @@ export function MainPanel() {
             <Plus size={16} aria-hidden="true" />
             New Query
           </button>
+        </div>
+      ) : activeTab?.type === 'settings' ? (
+        <div
+          role="tabpanel"
+          id={`tabpanel-${activeTab.id}`}
+          aria-labelledby={`tab-${activeTab.id}`}
+          className="flex-1 overflow-hidden"
+        >
+          <AgentSettings />
         </div>
       ) : activeTab?.type === 'table' && activeTab.tableId ? (
         <div

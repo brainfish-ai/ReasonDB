@@ -5,14 +5,17 @@
 use clap::Parser;
 use reasondb_core::{
     auth::ApiKeyStore,
-    llm::provider::{LLMProvider, Reasoner},
+    llm::{
+        config::{LlmModelConfig, LlmOptions, LlmSettings},
+        dynamic::DynamicReasoner,
+    },
     store::NodeStore,
     text_index::TextIndex,
 };
-use reasondb_server::{create_server, init_metrics, jobs, AppState, AuthConfig, ClusterNodeConfig, RateLimitConfig, ServerConfig};
+use reasondb_server::{create_server, init_metrics, jobs, routes, AppState, AuthConfig, ClusterNodeConfig, RateLimitConfig, ServerConfig};
 use redb::Database;
 use std::sync::Arc;
-use tracing::{info, Level};
+use tracing::{info, warn, Level};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// ReasonDB - A Reasoning-Native Database
@@ -34,7 +37,7 @@ struct Args {
 
     /// LLM provider: openai, anthropic, gemini, cohere, glm, kimi, or ollama
     #[arg(long, env = "REASONDB_LLM_PROVIDER")]
-    llm_provider: String,
+    llm_provider: Option<String>,
 
     /// API key for the chosen LLM provider
     #[arg(long, env = "REASONDB_LLM_API_KEY")]
@@ -222,85 +225,136 @@ async fn main() -> anyhow::Result<()> {
         cluster: cluster_config,
     };
 
-    let provider_name = args.llm_provider.to_lowercase();
-    let api_key = args.llm_api_key.filter(|k| !k.is_empty());
-    let model = args.model.filter(|m| !m.is_empty());
+    // ------ LLM Configuration ------
+    // Priority: 1) DB-persisted settings  2) CLI/env arg seed  3) placeholder
+    let db_settings = store.get_llm_settings().unwrap_or_else(|e| {
+        warn!("Failed to load LLM settings from DB: {}", e);
+        None
+    });
 
-    let require_key = |name: &str| -> anyhow::Result<String> {
-        api_key.clone().ok_or_else(|| {
-            anyhow::anyhow!(
-                "{} provider requires an API key — set REASONDB_LLM_API_KEY",
-                name
-            )
-        })
+    let settings = if let Some(s) = db_settings {
+        info!(
+            "Loaded LLM settings from database (ingestion={}/{}, retrieval={}/{})",
+            s.ingestion.provider,
+            s.ingestion.model.as_deref().unwrap_or("default"),
+            s.retrieval.provider,
+            s.retrieval.model.as_deref().unwrap_or("default"),
+        );
+        Some(s)
+    } else {
+        let provider_name = args.llm_provider
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_lowercase());
+        let api_key = args.llm_api_key.filter(|k| !k.is_empty());
+        let model = args.model.filter(|m| !m.is_empty());
+        let base_url = if provider_name.as_deref() == Some("ollama") {
+            Some(args.ollama_base_url.clone())
+        } else {
+            std::env::var("REASONDB_LLM_BASE_URL").ok().filter(|u| !u.is_empty())
+        };
+
+        match provider_name {
+            Some(pn) => {
+                let supported = ["openai", "anthropic", "gemini", "cohere", "glm", "kimi", "ollama"];
+                if !supported.contains(&pn.as_str()) {
+                    anyhow::bail!(
+                        "Unknown LLM provider '{}'. Supported: {}",
+                        pn,
+                        supported.join(", ")
+                    );
+                }
+                let cli_config = LlmModelConfig {
+                    provider: pn,
+                    api_key,
+                    model,
+                    base_url,
+                    options: LlmOptions::default(),
+                };
+                let env_settings = LlmSettings {
+                    ingestion: cli_config.clone(),
+                    retrieval: cli_config,
+                };
+                info!("Seeding LLM settings from CLI / environment variables");
+                if let Err(e) = store.set_llm_settings(&env_settings) {
+                    warn!("Failed to persist initial LLM settings: {}", e);
+                }
+                Some(env_settings)
+            }
+            None => {
+                warn!(
+                    "No LLM settings found in DB and --llm-provider not provided. \
+                     Server will start but LLM features require configuration via PUT /v1/config/llm"
+                );
+                None
+            }
+        }
     };
 
-    let provider = match provider_name.as_str() {
-        "openai" => {
-            let key = require_key("OpenAI")?;
-            match &model {
-                Some(m) => LLMProvider::OpenAI { api_key: key, model: m.clone() },
-                None => LLMProvider::openai(&key),
-            }
+    let dynamic_reasoner = match &settings {
+        Some(s) => {
+            info!(
+                "LLM ingestion: {} / {}",
+                s.ingestion.provider,
+                s.ingestion.model.as_deref().unwrap_or("default")
+            );
+            info!(
+                "LLM retrieval: {} / {}",
+                s.retrieval.provider,
+                s.retrieval.model.as_deref().unwrap_or("default")
+            );
+            DynamicReasoner::from_settings(s)?
         }
-        "anthropic" => {
-            let key = require_key("Anthropic")?;
-            match &model {
-                Some(m) => LLMProvider::anthropic_custom(&key, m),
-                None => LLMProvider::claude_sonnet(&key),
-            }
+        None => {
+            let placeholder = LlmModelConfig {
+                provider: "openai".into(),
+                api_key: Some("unconfigured".into()),
+                model: Some("gpt-4o-mini".into()),
+                base_url: None,
+                options: LlmOptions::default(),
+            };
+            let placeholder_settings = LlmSettings {
+                ingestion: placeholder.clone(),
+                retrieval: placeholder,
+            };
+            DynamicReasoner::from_settings(&placeholder_settings)?
         }
-        "gemini" => {
-            let key = require_key("Gemini")?;
-            match &model {
-                Some(m) => LLMProvider::Gemini { api_key: key, model: m.clone() },
-                None => LLMProvider::gemini(&key),
-            }
-        }
-        "cohere" => {
-            let key = require_key("Cohere")?;
-            match &model {
-                Some(m) => LLMProvider::Cohere { api_key: key, model: m.clone() },
-                None => LLMProvider::cohere(&key),
-            }
-        }
-        "glm" => {
-            let key = require_key("GLM (Zhipu AI)")?;
-            match &model {
-                Some(m) => LLMProvider::Glm { api_key: key, model: m.clone() },
-                None => LLMProvider::glm(&key),
-            }
-        }
-        "kimi" => {
-            let key = require_key("Kimi (Moonshot)")?;
-            match &model {
-                Some(m) => LLMProvider::Kimi { api_key: key, model: m.clone() },
-                None => LLMProvider::kimi(&key),
-            }
-        }
-        "ollama" => {
-            let m = model.ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Ollama provider requires a model name — set REASONDB_MODEL (e.g. llama3.3, qwen2.5, mistral)"
-                )
-            })?;
-            LLMProvider::ollama_from_url(&args.ollama_base_url, m)
-        }
-        other => anyhow::bail!(
-            "Unknown LLM provider '{}'. Supported: openai, anthropic, gemini, cohere, glm, kimi, ollama",
-            other
-        ),
     };
 
-    info!("LLM provider: {} | model: {}", provider.provider_name(), provider.model());
-
-    let reasoner = Reasoner::new(provider);
-    let (app_state, job_rx) = AppState::new(store, text_index, reasoner, api_key_store, config);
+    let (app_state, job_rx) =
+        AppState::new(store, text_index, dynamic_reasoner, api_key_store, config);
     let state = Arc::new(app_state);
+
+    // Restore rate limit state from previous run
+    match state.store.load_all_rate_limits() {
+        Ok(snapshots) if !snapshots.is_empty() => {
+            info!("Restoring {} rate limit entries from database", snapshots.len());
+            state.rate_limit_store.import_snapshots(&snapshots);
+        }
+        _ => {}
+    }
+
+    // Periodically snapshot rate limit state to redb
+    let snapshot_store = state.store.clone();
+    let snapshot_rl = state.rate_limit_store.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            let snapshots = snapshot_rl.export_snapshots();
+            if !snapshots.is_empty() {
+                let refs: Vec<(&str, _)> = snapshots.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+                if let Err(e) = snapshot_store.save_rate_limits(&refs) {
+                    tracing::warn!("Failed to persist rate limit snapshots: {}", e);
+                }
+            }
+            snapshot_rl.cleanup();
+        }
+    });
 
     tokio::spawn(jobs::run_worker(state.clone(), job_rx));
 
-    let app = create_server(state);
+    let mut app = create_server(state.clone());
+    app = app.merge(routes::config::config_routes(state));
 
     let addr = format!("{}:{}", args.host, args.port);
     info!("Server listening on http://{}", addr);

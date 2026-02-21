@@ -439,6 +439,35 @@ export interface JobStatusResponse {
   updated_at: string
 }
 
+// LLM Configuration
+export interface LlmOptions {
+  temperature?: number
+  max_tokens?: number
+  system_prompt?: string
+  top_p?: number
+  frequency_penalty?: number
+  presence_penalty?: number
+  disable_thinking?: boolean
+}
+
+export interface LlmModelConfig {
+  provider: string
+  api_key?: string
+  model?: string
+  base_url?: string
+  options?: LlmOptions
+}
+
+export interface LlmSettings {
+  ingestion: LlmModelConfig
+  retrieval: LlmModelConfig
+}
+
+export interface PatchLlmSettings {
+  ingestion?: LlmModelConfig
+  retrieval?: LlmModelConfig
+}
+
 // Errors
 export interface ApiError {
   error: string
@@ -799,6 +828,49 @@ class ReasonDBClient {
       method: 'POST',
       body: JSON.stringify(request),
     })
+  }
+
+  // ==================== LLM Configuration ====================
+
+  /**
+   * Get current LLM settings from the server (keys masked)
+   */
+  async getLlmConfig(): Promise<LlmSettings> {
+    return this.request<LlmSettings>('/v1/config/llm', {}, true)
+  }
+
+  /**
+   * Replace both ingestion and retrieval LLM config
+   */
+  async updateLlmConfig(settings: LlmSettings): Promise<LlmSettings> {
+    return this.request<LlmSettings>('/v1/config/llm', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    })
+  }
+
+  /**
+   * Partially update LLM config (ingestion and/or retrieval)
+   */
+  async patchLlmConfig(patch: PatchLlmSettings): Promise<LlmSettings> {
+    return this.request<LlmSettings>('/v1/config/llm', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    })
+  }
+
+  /**
+   * Update only the ingestion LLM config
+   */
+  async updateIngestionConfig(config: LlmModelConfig): Promise<LlmSettings> {
+    return this.patchLlmConfig({ ingestion: config })
+  }
+
+  /**
+   * Update only the retrieval LLM config
+   */
+  async updateRetrievalConfig(config: LlmModelConfig): Promise<LlmSettings> {
+    return this.patchLlmConfig({ retrieval: config })
   }
 
   // ==================== Jobs ====================

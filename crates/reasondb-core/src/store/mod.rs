@@ -13,6 +13,7 @@
 //! - `queries` - Search and filter operations
 //! - `relations` - Document relationship operations
 
+mod config;
 mod documents;
 mod indexes;
 mod jobs;
@@ -189,6 +190,11 @@ impl NodeStore {
             // Rate limit snapshot table
             let _ = write_txn
                 .open_table(RATE_LIMITS_TABLE)
+                .map_err(StorageError::from)?;
+
+            // Config table
+            let _ = write_txn
+                .open_table(config::CONFIG_TABLE)
                 .map_err(StorageError::from)?;
 
             // Relation tables

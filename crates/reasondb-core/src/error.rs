@@ -54,6 +54,10 @@ pub enum ReasonError {
     /// Backup/restore error
     #[error("Backup error: {0}")]
     Backup(String),
+
+    /// Configuration error
+    #[error("Config error: {0}")]
+    Config(String),
 }
 
 /// Alias for backward compatibility

@@ -257,7 +257,7 @@ async fn main() -> Result<()> {
             commands::health::run(&cli.url).await
         }
         Commands::Config(cmd) => {
-            commands::config::run(cmd).await
+            commands::config::run(cmd, &cli.url).await
         }
         Commands::Auth(cmd) => {
             commands::auth::run(&cli.url, cmd).await

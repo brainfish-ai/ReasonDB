@@ -4,6 +4,8 @@
 //! Supports multiple providers: OpenAI, Anthropic, Gemini, Cohere, GLM (Zhipu AI),
 //! Kimi (Moonshot AI), and Ollama (local models).
 
+pub mod config;
+pub mod dynamic;
 pub mod mock;
 pub mod provider;
 
@@ -328,5 +330,7 @@ mod tests {
 }
 
 // Re-export for convenience
+pub use config::{LlmModelConfig, LlmOptions, LlmSettings};
+pub use dynamic::DynamicReasoner;
 pub use mock::MockReasoner;
 pub use provider::{LLMProvider, Reasoner};

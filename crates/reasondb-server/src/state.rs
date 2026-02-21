@@ -7,7 +7,7 @@ use reasondb_core::{
     auth::ApiKeyStore,
     cache::QueryCache,
     cluster::{ClusterConfig, ClusterStateMachine, NodeId, RaftNode},
-    llm::{provider::Reasoner, ReasoningEngine},
+    llm::ReasoningEngine,
     ratelimit::RateLimitStore,
     shard::ShardRouter,
     store::NodeStore,
@@ -18,7 +18,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 /// Application state shared across handlers
-pub struct AppState<R: ReasoningEngine = Reasoner> {
+pub struct AppState<R: ReasoningEngine = reasondb_core::llm::dynamic::DynamicReasoner> {
     /// Database store
     pub store: Arc<NodeStore>,
     /// Full-text search index (BM25)
@@ -277,4 +277,4 @@ impl Default for ServerConfig {
 }
 
 /// Type alias for state with the default reasoner
-pub type RealAppState = AppState<Reasoner>;
+pub type RealAppState = AppState<reasondb_core::llm::dynamic::DynamicReasoner>;

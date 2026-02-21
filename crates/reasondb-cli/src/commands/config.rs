@@ -211,9 +211,75 @@ pub enum ConfigCommands {
 
     /// Initialize configuration interactively
     Init,
+
+    /// Manage server-side LLM configuration (ingestion & retrieval models)
+    #[command(subcommand)]
+    Llm(LlmConfigCommands),
 }
 
-pub async fn run(cmd: ConfigCommands) -> Result<()> {
+/// Subcommands for server-side LLM configuration
+#[derive(clap::Subcommand)]
+pub enum LlmConfigCommands {
+    /// Show current LLM settings from the server
+    Show,
+
+    /// Replace both ingestion and retrieval config (JSON body from stdin or args)
+    Set {
+        /// Provider name (openai, anthropic, gemini, cohere, glm, kimi, ollama)
+        #[arg(long)]
+        provider: String,
+        /// API key
+        #[arg(long)]
+        api_key: Option<String>,
+        /// Model name
+        #[arg(long)]
+        model: Option<String>,
+        /// Base URL (for Ollama)
+        #[arg(long)]
+        base_url: Option<String>,
+    },
+
+    /// Update only the ingestion model config
+    SetIngestion {
+        #[arg(long)]
+        provider: String,
+        #[arg(long)]
+        api_key: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        base_url: Option<String>,
+        /// Temperature (0.0-1.0)
+        #[arg(long)]
+        temperature: Option<f32>,
+        /// Max tokens
+        #[arg(long)]
+        max_tokens: Option<u64>,
+        /// Disable extended thinking
+        #[arg(long)]
+        disable_thinking: bool,
+    },
+
+    /// Update only the retrieval model config
+    SetRetrieval {
+        #[arg(long)]
+        provider: String,
+        #[arg(long)]
+        api_key: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        base_url: Option<String>,
+        /// Temperature (0.0-1.0)
+        #[arg(long)]
+        temperature: Option<f32>,
+        /// Max tokens
+        #[arg(long)]
+        max_tokens: Option<u64>,
+    },
+}
+
+pub async fn run(cmd: ConfigCommands, server_url: &str) -> Result<()> {
     match cmd {
         ConfigCommands::Set { key, value } => {
             let mut config = ReasonDBConfig::load()?;
@@ -301,9 +367,170 @@ pub async fn run(cmd: ConfigCommands) -> Result<()> {
         ConfigCommands::Init => {
             init_interactive().await?;
         }
+
+        ConfigCommands::Llm(llm_cmd) => {
+            run_llm_config(server_url, llm_cmd).await?;
+        }
     }
 
     Ok(())
+}
+
+async fn run_llm_config(server_url: &str, cmd: LlmConfigCommands) -> Result<()> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/v1/config/llm", server_url);
+
+    match cmd {
+        LlmConfigCommands::Show => {
+            let resp = client.get(&url).send().await?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("Server returned {}: {}", status, body);
+            }
+            let settings: serde_json::Value = resp.json().await?;
+
+            println!();
+            println!("{}", "Server LLM Configuration".cyan().bold());
+            println!();
+            println!("{}", "[ingestion]".yellow());
+            print_model_config(settings.get("ingestion"));
+            println!();
+            println!("{}", "[retrieval]".yellow());
+            print_model_config(settings.get("retrieval"));
+            println!();
+        }
+
+        LlmConfigCommands::Set { provider, api_key, model, base_url } => {
+            let config = build_model_json(&provider, api_key, model, base_url, None, None, false);
+            let body = serde_json::json!({
+                "ingestion": config,
+                "retrieval": config,
+            });
+
+            let resp = client.put(&url).json(&body).send().await?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("Server returned {}: {}", status, body);
+            }
+            println!("  {} LLM settings updated (both ingestion & retrieval)", "✓".green());
+        }
+
+        LlmConfigCommands::SetIngestion {
+            provider, api_key, model, base_url,
+            temperature, max_tokens, disable_thinking,
+        } => {
+            let config = build_model_json(&provider, api_key, model, base_url, temperature, max_tokens, disable_thinking);
+            let body = serde_json::json!({ "ingestion": config });
+
+            let resp = client.patch(&url).json(&body).send().await?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("Server returned {}: {}", status, body);
+            }
+            println!("  {} Ingestion LLM updated", "✓".green());
+        }
+
+        LlmConfigCommands::SetRetrieval {
+            provider, api_key, model, base_url,
+            temperature, max_tokens,
+        } => {
+            let config = build_model_json(&provider, api_key, model, base_url, temperature, max_tokens, false);
+            let body = serde_json::json!({ "retrieval": config });
+
+            let resp = client.patch(&url).json(&body).send().await?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("Server returned {}: {}", status, body);
+            }
+            println!("  {} Retrieval LLM updated", "✓".green());
+        }
+    }
+
+    Ok(())
+}
+
+fn build_model_json(
+    provider: &str,
+    api_key: Option<String>,
+    model: Option<String>,
+    base_url: Option<String>,
+    temperature: Option<f32>,
+    max_tokens: Option<u64>,
+    disable_thinking: bool,
+) -> serde_json::Value {
+    let mut options = serde_json::Map::new();
+    if let Some(t) = temperature {
+        options.insert("temperature".into(), serde_json::json!(t));
+    }
+    if let Some(mt) = max_tokens {
+        options.insert("max_tokens".into(), serde_json::json!(mt));
+    }
+    if disable_thinking {
+        options.insert("disable_thinking".into(), serde_json::json!(true));
+    }
+
+    let mut config = serde_json::Map::new();
+    config.insert("provider".into(), serde_json::json!(provider));
+    if let Some(k) = api_key {
+        config.insert("api_key".into(), serde_json::json!(k));
+    }
+    if let Some(m) = model {
+        config.insert("model".into(), serde_json::json!(m));
+    }
+    if let Some(u) = base_url {
+        config.insert("base_url".into(), serde_json::json!(u));
+    }
+    if !options.is_empty() {
+        config.insert("options".into(), serde_json::Value::Object(options));
+    }
+
+    serde_json::Value::Object(config)
+}
+
+fn print_model_config(config: Option<&serde_json::Value>) {
+    if let Some(c) = config {
+        println!(
+            "  provider = {}",
+            c.get("provider")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(not set)")
+                .green()
+        );
+        println!(
+            "  model    = {}",
+            c.get("model")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(default)")
+                .green()
+        );
+        println!(
+            "  api_key  = {}",
+            c.get("api_key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(not set)")
+                .green()
+        );
+        if let Some(url) = c.get("base_url").and_then(|v| v.as_str()) {
+            println!("  base_url = {}", url.green());
+        }
+        if let Some(opts) = c.get("options") {
+            if let Some(t) = opts.get("temperature").and_then(|v| v.as_f64()) {
+                println!("  temperature = {}", t.to_string().green());
+            }
+            if let Some(mt) = opts.get("max_tokens").and_then(|v| v.as_u64()) {
+                println!("  max_tokens  = {}", mt.to_string().green());
+            }
+            if opts.get("disable_thinking").and_then(|v| v.as_bool()).unwrap_or(false) {
+                println!("  disable_thinking = {}", "true".green());
+            }
+        }
+    } else {
+        println!("  {}", "(not configured)".dimmed());
+    }
 }
 
 async fn init_interactive() -> Result<()> {

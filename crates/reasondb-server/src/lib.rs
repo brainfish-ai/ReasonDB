@@ -74,7 +74,11 @@ pub use reasondb_core::ratelimit::RateLimitConfig;
 use axum::Router;
 use reasondb_core::{
     auth::ApiKeyStore,
-    llm::{provider::{LLMProvider, Reasoner}, ReasoningEngine},
+    llm::{
+        config::{LlmModelConfig, LlmOptions, LlmSettings},
+        dynamic::DynamicReasoner,
+        ReasoningEngine,
+    },
     store::NodeStore,
     text_index::TextIndex,
 };
@@ -85,7 +89,7 @@ use tower_http::{
     limit::RequestBodyLimitLayer,
     trace::TraceLayer,
 };
-use tracing::{info, Level};
+use tracing::{info, warn, Level};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
@@ -234,57 +238,76 @@ pub async fn run_server() -> anyhow::Result<()> {
 
     let addr = format!("{}:{}", host, port);
 
-    let provider_name = std::env::var("REASONDB_LLM_PROVIDER")
-        .map(|s| s.to_lowercase())
-        .unwrap_or_default();
-    let api_key = std::env::var("REASONDB_LLM_API_KEY").ok().filter(|k| !k.is_empty());
-    let model = std::env::var("REASONDB_MODEL").ok().filter(|m| !m.is_empty());
+    // ------ LLM Configuration ------
+    // Priority: 1) DB-persisted settings  2) env var seed  3) error
+    let db_settings = store.get_llm_settings().unwrap_or_else(|e| {
+        warn!("Failed to load LLM settings from DB: {}", e);
+        None
+    });
 
-    let require_key = |name: &str| -> anyhow::Result<String> {
-        api_key.clone().ok_or_else(|| {
-            anyhow::anyhow!("{} provider requires an API key — set REASONDB_LLM_API_KEY", name)
-        })
+    let settings = if let Some(s) = db_settings {
+        info!(
+            "Loaded LLM settings from database (ingestion={}/{}, retrieval={}/{})",
+            s.ingestion.provider,
+            s.ingestion.model.as_deref().unwrap_or("default"),
+            s.retrieval.provider,
+            s.retrieval.model.as_deref().unwrap_or("default"),
+        );
+        Some(s)
+    } else {
+        match llm_settings_from_env() {
+            Ok(env_settings) => {
+                info!("Seeding LLM settings from environment variables");
+                if let Err(e) = store.set_llm_settings(&env_settings) {
+                    warn!("Failed to persist initial LLM settings: {}", e);
+                }
+                Some(env_settings)
+            }
+            Err(e) => {
+                warn!(
+                    "No LLM settings found in DB or env vars ({}). \
+                     Server will start but LLM features require configuration via PUT /v1/config/llm",
+                    e
+                );
+                None
+            }
+        }
     };
 
-    let provider = match provider_name.as_str() {
-        "openai" => {
-            let key = require_key("OpenAI")?;
-            match &model {
-                Some(m) => LLMProvider::OpenAI { api_key: key, model: m.clone() },
-                None => LLMProvider::openai(&key),
-            }
+    let dynamic_reasoner = match &settings {
+        Some(s) => {
+            info!(
+                "LLM ingestion: {} / {}",
+                s.ingestion.provider,
+                s.ingestion.model.as_deref().unwrap_or("default")
+            );
+            info!(
+                "LLM retrieval: {} / {}",
+                s.retrieval.provider,
+                s.retrieval.model.as_deref().unwrap_or("default")
+            );
+            DynamicReasoner::from_settings(s)?
         }
-        "anthropic" => {
-            let key = require_key("Anthropic")?;
-            match &model {
-                Some(m) => LLMProvider::anthropic_custom(&key, m),
-                None => LLMProvider::claude_sonnet(&key),
-            }
+        None => {
+            // Placeholder: use a dummy OpenAI config that will fail on actual requests.
+            // Users must configure via the API before using LLM features.
+            let placeholder = LlmModelConfig {
+                provider: "openai".into(),
+                api_key: Some("unconfigured".into()),
+                model: Some("gpt-4o-mini".into()),
+                base_url: None,
+                options: LlmOptions::default(),
+            };
+            let placeholder_settings = LlmSettings {
+                ingestion: placeholder.clone(),
+                retrieval: placeholder,
+            };
+            DynamicReasoner::from_settings(&placeholder_settings)?
         }
-        "gemini" => {
-            let key = require_key("Gemini")?;
-            match &model {
-                Some(m) => LLMProvider::Gemini { api_key: key, model: m.clone() },
-                None => LLMProvider::gemini(&key),
-            }
-        }
-        "cohere" => {
-            let key = require_key("Cohere")?;
-            match &model {
-                Some(m) => LLMProvider::Cohere { api_key: key, model: m.clone() },
-                None => LLMProvider::cohere(&key),
-            }
-        }
-        other => anyhow::bail!(
-            "Unknown or missing LLM provider '{}'. Set REASONDB_LLM_PROVIDER to one of: openai, anthropic, gemini, cohere",
-            other
-        ),
     };
 
-    info!("LLM provider: {} | model: {}", provider.provider_name(), provider.model());
-
-    let reasoner = Reasoner::new(provider);
-    let (app_state, job_rx) = AppState::new(store, text_index, reasoner, api_key_store, config);
+    let (app_state, job_rx) =
+        AppState::new(store, text_index, dynamic_reasoner, api_key_store, config);
     let state = Arc::new(app_state);
 
     // Restore rate limit state from previous run
@@ -316,11 +339,59 @@ pub async fn run_server() -> anyhow::Result<()> {
 
     tokio::spawn(jobs::run_worker(state.clone(), job_rx));
 
-    let app = create_server(state);
+    let mut app = create_server(state.clone());
+
+    // Merge DynamicReasoner-specific config routes
+    app = app.merge(routes::config::config_routes(state));
 
     info!("Server listening on http://{}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+/// Build `LlmSettings` from environment variables (initial seed).
+///
+/// Returns `Err` if `REASONDB_LLM_PROVIDER` is missing or unrecognized,
+/// which is normal when the user intends to configure via the API later.
+fn llm_settings_from_env() -> anyhow::Result<LlmSettings> {
+    let provider_name = std::env::var("REASONDB_LLM_PROVIDER")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+
+    if provider_name.is_empty() {
+        anyhow::bail!("REASONDB_LLM_PROVIDER not set");
+    }
+
+    let supported = ["openai", "anthropic", "gemini", "cohere", "glm", "kimi", "ollama"];
+    if !supported.contains(&provider_name.as_str()) {
+        anyhow::bail!(
+            "Unknown LLM provider '{}'. Supported: {}",
+            provider_name,
+            supported.join(", ")
+        );
+    }
+
+    let api_key = std::env::var("REASONDB_LLM_API_KEY")
+        .ok()
+        .filter(|k| !k.is_empty());
+    let model = std::env::var("REASONDB_MODEL")
+        .ok()
+        .filter(|m| !m.is_empty());
+
+    let base_config = LlmModelConfig {
+        provider: provider_name,
+        api_key,
+        model,
+        base_url: std::env::var("REASONDB_LLM_BASE_URL").ok().filter(|u| !u.is_empty()),
+        options: LlmOptions::default(),
+    };
+
+    Ok(LlmSettings {
+        ingestion: base_config.clone(),
+        retrieval: base_config,
+    })
 }

@@ -5,6 +5,7 @@
 pub mod auth;
 pub mod backup;
 pub mod cluster;
+pub mod config;
 pub mod documents;
 pub mod ingest;
 pub mod jobs;

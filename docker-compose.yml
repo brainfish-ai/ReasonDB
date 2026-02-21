@@ -11,10 +11,13 @@ services:
       REASONDB_HOST: "0.0.0.0"
       REASONDB_PORT: "4444"
       REASONDB_PATH: "/data/reasondb.redb"
-      REASONDB_LLM_PROVIDER: "${REASONDB_LLM_PROVIDER}"
+      # LLM config is now stored in the database and managed via the API
+      # (GET/PUT/PATCH /v1/config/llm). These env vars only seed the initial
+      # config on first run. After that, use the API or CLI to update.
+      REASONDB_LLM_PROVIDER: "${REASONDB_LLM_PROVIDER:-}"
       REASONDB_LLM_API_KEY: "${REASONDB_LLM_API_KEY:-}"
       REASONDB_MODEL: "${REASONDB_MODEL:-}"
-      REASONDB_OLLAMA_BASE_URL: "${REASONDB_OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}"
+      REASONDB_LLM_BASE_URL: "${REASONDB_LLM_BASE_URL:-}"
       REASONDB_RATE_LIMIT_RPM: "300"
       REASONDB_RATE_LIMIT_RPH: "5000"
       REASONDB_RATE_LIMIT_BURST: "30"

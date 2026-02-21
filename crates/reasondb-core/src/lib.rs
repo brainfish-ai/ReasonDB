@@ -62,7 +62,7 @@ pub use auth::{ApiKey, ApiKeyId, ApiKeyMetadata, ApiKeyStore, KeyPrefix, Permiss
 pub use cache::{CachedDocSummary, CachedMatch, CachedQueryResult, QueryCache, QueryCacheStats, SummaryCache};
 pub use engine::{SearchConfig, SearchEngine, SearchResult};
 pub use error::{ReasonDBError, ReasonError, Result};
-pub use llm::{LLMProvider, MockReasoner, Reasoner, ReasoningEngine};
+pub use llm::{DynamicReasoner, LLMProvider, LlmModelConfig, LlmOptions, LlmSettings, MockReasoner, Reasoner, ReasoningEngine};
 pub use model::{
     Document, DocumentId, DocumentRelation, NodeId, NodeMetadata, PageNode, RelationBuilder,
     RelationType, SearchFilter, Table, TableId,

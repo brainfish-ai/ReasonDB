@@ -4,7 +4,7 @@ import { persist } from 'zustand/middleware'
 export interface Tab {
   id: string
   title: string
-  type: 'query' | 'table'
+  type: 'query' | 'table' | 'settings'
   tableId?: string // For table tabs
   query?: string // For query tabs - store the query content
 }
