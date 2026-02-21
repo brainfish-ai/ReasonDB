@@ -56,9 +56,12 @@ ReasonDB introduces **Hierarchical Reasoning Retrieval (HRR)**—a fundamentally
     ```
   </Tab>
   <Tab title="ReasonDB Approach">
+    ```sql
+    SELECT * FROM contracts
+    REASON 'What are the termination conditions?'
     ```
-    Query: "What are the termination conditions?"
-    
+
+    ```
     → LLM reads document summary
     → Identifies "Section 8: Termination" as relevant
     → Navigates to section, reads subsection summaries
@@ -75,10 +78,10 @@ ReasonDB introduces **Hierarchical Reasoning Retrieval (HRR)**—a fundamentally
 
 <Steps>
   <Step title="Ingest Your Documents">
-    Upload PDFs, Markdown, HTML, or plain text. ReasonDB parses structure, builds a hierarchical knowledge tree, and generates LLM summaries for every node.
+    Upload PDFs, Word, Excel, HTML, or plain text. Extractor plugins convert them to Markdown, then ReasonDB builds a hierarchical knowledge tree and generates LLM summaries for every node.
   </Step>
   <Step title="Ask Natural Language Questions">
-    Query in plain English. The LLM reads node summaries to navigate the tree intelligently—no keyword matching, actual reasoning.
+    Query in plain English. The LLM reads node summaries to navigate the tree intelligently — no keyword matching, actual reasoning.
   </Step>
   <Step title="Get Precise Answers">
     Receive synthesized answers with confidence scores, source citations, and the exact reasoning path taken through your documents.
@@ -87,41 +90,47 @@ ReasonDB introduces **Hierarchical Reasoning Retrieval (HRR)**—a fundamentally
 
 <Mermaid>
 {`flowchart TB
-    A[📄 Documents] --> B[Parse & Chunk]
-    B --> C[🌳 Build Tree]
-    C --> D[✨ Summarize]
-    D --> E[(Knowledge Base)]
+    A[📄 Documents / URLs] --> B[🔌 Extractor Plugin]
+    B --> C[📝 Chunk by Structure]
+    C --> D[🌳 Build Tree]
+    D --> E[✨ LLM Summarizes]
+    E --> F[(Knowledge Base)]
     
-    F[❓ Your Question] --> G[🧠 LLM Navigates]
-    E --> G
-    G --> H[🎯 Extract Answer]
-    H --> I[✅ Answer + Confidence]`}
+    G[❓ Your Question] --> H[🧠 LLM Navigates Tree]
+    F --> H
+    H --> I[🎯 Extract Answer]
+    I --> J[✅ Answer + Confidence + Path]`}
 </Mermaid>
+
+### Why Trees Scale
+
+With **1 million documents** (50M nodes), a vector DB scans all 50M embeddings. ReasonDB's tree traversal visits **~25 nodes** — the LLM prunes irrelevant branches at each level, acting as an exponential filter. [Learn more](/concepts#scaling-to-millions-of-documents).
 
 ## Quick Start
 
 Get from zero to intelligent document search in under 5 minutes:
 
 ```bash
-# Install and configure
+# Clone and start
 git clone https://github.com/reasondb/reasondb.git && cd reasondb
-cargo build --release
-reasondb config init  # Interactive setup wizard
+echo 'REASONDB_LLM_PROVIDER=anthropic' > .env
+echo 'REASONDB_LLM_API_KEY=sk-ant-...' >> .env
+docker compose up --build
+```
 
-# Start the server
-reasondb serve
+Then query your documents with RQL:
 
-# Create a knowledge base
-curl -X POST http://localhost:4444/v1/tables \
-  -d '{"name": "Contracts"}'
+```sql
+-- Keyword search across a table
+SELECT * FROM contracts SEARCH 'payment terms' LIMIT 5
 
-# Ingest a document
-curl -X POST http://localhost:4444/v1/ingest/text \
-  -d '{"title": "Service Agreement", "table_id": "tbl_...", "content": "..."}'
+-- LLM-guided reasoning (navigates the document tree)
+SELECT * FROM contracts REASON 'What are the late fees and penalties?'
 
-# Ask questions in natural language
-curl -X POST http://localhost:4444/v1/search \
-  -d '{"query": "What are the payment terms and late fees?"}'
+-- Combine filters, search, and reasoning
+SELECT * FROM contracts
+WHERE tags CONTAINS 'nda' AND metadata.value_usd > 10000
+REASON 'What are the termination conditions?'
 ```
 
 ## Built for Production
@@ -135,6 +144,9 @@ curl -X POST http://localhost:4444/v1/search \
   </Card>
   <Card title="API Key Authentication" icon="shield-check">
     Production-ready security with fine-grained permissions and rate limiting.
+  </Card>
+  <Card title="Plugin Extraction" icon="puzzle-piece">
+    Extensible plugins for PDF, Office, images, audio, URLs. Add your own in Python, Node.js, or Bash.
   </Card>
   <Card title="High Performance" icon="lightning">
     Rust-powered. ACID-compliant. Async parallel traversal. Sub-second responses.
@@ -167,8 +179,8 @@ curl -X POST http://localhost:4444/v1/search \
   <Card title="Core Concepts" icon="lightbulb" href="/concepts">
     Understand trees, nodes, and hierarchical reasoning.
   </Card>
-  <Card title="API Reference" icon="code" href="/api-reference/introduction">
-    Complete REST API documentation with examples.
+  <Card title="Plugins" icon="puzzle-piece" href="/guides/plugins">
+    Extend extraction with custom plugins.
   </Card>
   <Card title="Tutorials" icon="book-open" href="/tutorials">
     Build real applications: legal search, research assistants, and more.

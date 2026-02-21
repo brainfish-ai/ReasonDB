@@ -176,20 +176,17 @@ Response:
 
 ## Searching Within Tables
 
-### Using Search API
-
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -d '{
-    "query": "confidentiality clause",
-    "table_id": "tbl_legal"
-  }'
-```
-
-### Using RQL
+Use RQL to search within a specific table:
 
 ```sql
+-- Keyword search
+SELECT * FROM legal SEARCH 'confidentiality clause'
+
+-- Filter by tags
 SELECT * FROM legal WHERE tags CONTAINS 'nda'
+
+-- LLM-guided reasoning
+SELECT * FROM legal REASON 'What are the confidentiality obligations?'
 ```
 
 The table name in RQL refers to the table's `name` field (case-insensitive).

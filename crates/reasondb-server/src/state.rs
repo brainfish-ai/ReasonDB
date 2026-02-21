@@ -13,6 +13,7 @@ use reasondb_core::{
     store::NodeStore,
     text_index::TextIndex,
 };
+use reasondb_plugin::PluginManager;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -38,6 +39,8 @@ pub struct AppState<R: ReasoningEngine = Reasoner> {
     pub job_queue: Arc<JobQueue>,
     /// Shard router for table-level partitioning
     pub shard_router: Arc<ShardRouter>,
+    /// Plugin manager for the plugin system
+    pub plugin_manager: Arc<PluginManager>,
 }
 
 impl<R: ReasoningEngine> AppState<R> {
@@ -71,6 +74,24 @@ impl<R: ReasoningEngine> AppState<R> {
         
         let shard_router = Arc::new(ShardRouter::single_node(&config.cluster.node_id));
 
+        let plugins_dir = std::env::var("REASONDB_PLUGINS_DIR")
+            .unwrap_or_else(|_| "./plugins".to_string());
+        let plugins_enabled = std::env::var("REASONDB_PLUGINS_ENABLED")
+            .map(|v| v != "false" && v != "0")
+            .unwrap_or(true);
+
+        let plugin_manager = if plugins_enabled {
+            let mut pm = PluginManager::new(std::path::Path::new(&plugins_dir));
+            if let Err(e) = pm.discover() {
+                tracing::warn!("Plugin discovery failed: {}", e);
+            } else {
+                tracing::info!("Discovered {} plugins from {}", pm.plugin_count(), plugins_dir);
+            }
+            Arc::new(pm)
+        } else {
+            Arc::new(PluginManager::disabled())
+        };
+
         (Self {
             store,
             text_index: Arc::new(text_index),
@@ -82,6 +103,7 @@ impl<R: ReasoningEngine> AppState<R> {
             config,
             job_queue,
             shard_router,
+            plugin_manager,
         }, job_rx)
     }
     

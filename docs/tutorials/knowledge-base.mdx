@@ -142,10 +142,8 @@ Now let's answer questions using the LLM:
 
 ### Basic Questions
 
-```bash
-# How do I create a project?
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM knowledge_base REASON '\''How do I create a new project?'\''"}'
+```sql
+SELECT * FROM knowledge_base REASON 'How do I create a new project?'
 ```
 
 **Response:**
@@ -161,16 +159,14 @@ curl -X POST http://localhost:4444/v1/query \
 
 ### Pricing Questions
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM knowledge_base REASON '\''How much does TaskFlow cost?'\''"}'
+```sql
+SELECT * FROM knowledge_base REASON 'How much does TaskFlow cost?'
 ```
 
 ### Troubleshooting Questions
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM knowledge_base REASON '\''I forgot my password, what should I do?'\''"}'
+```sql
+SELECT * FROM knowledge_base REASON 'I forgot my password, what should I do?'
 ```
 
 ## Step 4: Scoped Queries
@@ -179,41 +175,41 @@ Filter to specific documentation areas:
 
 ### Only Search Getting Started
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM knowledge_base WHERE tags CONTAINS '\''getting-started'\'' REASON '\''How do I invite team members?'\''"}'
+```sql
+SELECT * FROM knowledge_base
+WHERE tags CONTAINS 'getting-started'
+REASON 'How do I invite team members?'
 ```
 
 ### Only Search Troubleshooting
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM knowledge_base WHERE metadata.category = '\''troubleshooting'\'' REASON '\''Why is the app slow?'\''"}'
+```sql
+SELECT * FROM knowledge_base
+WHERE metadata.category = 'troubleshooting'
+REASON 'Why is the app slow?'
 ```
 
 ### Only Search Billing
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM knowledge_base WHERE tags CONTAINS '\''billing'\'' REASON '\''Do you offer any discounts?'\''"}'
+```sql
+SELECT * FROM knowledge_base
+WHERE tags CONTAINS 'billing'
+REASON 'Do you offer any discounts?'
 ```
 
 ## Step 5: Handle Question Variations
 
 The LLM understands different ways of asking the same question:
 
-```bash
-# Formal
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM knowledge_base REASON '\''What is the process for password recovery?'\''"}'
+```sql
+-- Formal
+SELECT * FROM knowledge_base REASON 'What is the process for password recovery?'
 
-# Casual
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM knowledge_base REASON '\''forgot my password help'\''"}'
+-- Casual
+SELECT * FROM knowledge_base REASON 'forgot my password help'
 
-# Specific
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM knowledge_base REASON '\''I cannot log in because I do not remember my password'\''"}'
+-- Specific
+SELECT * FROM knowledge_base REASON 'I cannot log in because I do not remember my password'
 ```
 
 All three should return similar answers about password reset.
@@ -269,9 +265,10 @@ print(f"Source: {result['source']}")
 
 For faster responses, use SEARCH to pre-filter, then REASON:
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM knowledge_base SEARCH '\''password reset'\'' REASON '\''How do I reset my password?'\''"}'
+```sql
+SELECT * FROM knowledge_base
+SEARCH 'password reset'
+REASON 'How do I reset my password?'
 ```
 
 ### Use Higher Confidence Threshold
@@ -305,18 +302,18 @@ else:
 
   <Accordion title="Challenge 2: Build a category suggester">
     Use RQL to suggest which category a question belongs to:
-    ```bash
-    curl -X POST http://localhost:4444/v1/query \
-      -d '{"query": "SELECT DISTINCT metadata.category FROM knowledge_base SEARCH '\''payment credit card'\''"}'
-    ```
+
+```sql
+SELECT DISTINCT metadata.category FROM knowledge_base SEARCH 'payment credit card'
+```
   </Accordion>
 
   <Accordion title="Challenge 3: Find related articles">
     After answering a question, suggest related content:
-    ```bash
-    curl -X POST http://localhost:4444/v1/query \
-      -d '{"query": "SELECT title FROM knowledge_base WHERE tags CONTAINS '\''billing'\'' LIMIT 3"}'
-    ```
+
+```sql
+SELECT title FROM knowledge_base WHERE tags CONTAINS 'billing' LIMIT 3
+```
   </Accordion>
 </AccordionGroup>
 

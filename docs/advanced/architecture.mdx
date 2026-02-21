@@ -3,7 +3,7 @@ title: Architecture
 description: Deep dive into ReasonDB's system architecture and design
 ---
 
-ReasonDB is built as a Rust workspace with three main crates: `reasondb-core`, `reasondb-ingest`, and `reasondb-server`. This page explains the system architecture and how components interact.
+ReasonDB is built as a Rust workspace with four main crates: `reasondb-core`, `reasondb-ingest`, `reasondb-plugin`, and `reasondb-server`. This page explains the system architecture and how components interact.
 
 ## System Overview
 
@@ -30,10 +30,15 @@ ReasonDB is built as a Rust workspace with three main crates: `reasondb-core`, `
 
     subgraph Ingest["reasondb-ingest"]
         Pipeline[Ingest Pipeline]
-        Extractor[Text Extractor]
         Chunker[Chunker]
         TreeBuilder[Tree Builder]
         Summarizer[Summarizer]
+    end
+
+    subgraph Plugins["reasondb-plugin"]
+        PluginMgr[Plugin Manager]
+        Extractors[Extractor Plugins]
+        PostProc[Post-Processors]
     end
 
     subgraph External
@@ -49,9 +54,13 @@ ReasonDB is built as a Rust workspace with three main crates: `reasondb-core`, `
     State --> Engine
     State --> Store
     State --> Pipeline
+    State --> PluginMgr
     Engine --> LLM
     Engine --> Store
-    Pipeline --> Extractor --> Chunker --> TreeBuilder --> Summarizer
+    Pipeline --> PluginMgr
+    PluginMgr --> Extractors
+    PluginMgr --> PostProc
+    Extractors --> Chunker --> TreeBuilder --> Summarizer
     Summarizer --> LLM
     Pipeline --> Store
     Store --> DB
@@ -77,6 +86,7 @@ ReasonDB is built as a Rust workspace with three main crates: `reasondb-core`, `
 
     subgraph Workspace[ReasonDB Workspace]
         core[reasondb-core]
+        plugin[reasondb-plugin]
         ingest[reasondb-ingest]
         server[reasondb-server]
     end
@@ -88,11 +98,16 @@ ReasonDB is built as a Rust workspace with three main crates: `reasondb-core`, `
     core --> rig
     core --> tantivy
 
+    plugin --> serde
+    plugin --> tokio
+
     ingest --> core
+    ingest --> plugin
     ingest --> tokio
 
     server --> core
     server --> ingest
+    server --> plugin
     server --> axum
     server --> tokio`}
 </Mermaid>
@@ -231,9 +246,28 @@ search = { "SEARCH" ~ string_literal }
 reason = { "REASON" ~ string_literal }
 ```
 
+## reasondb-plugin
+
+The plugin crate manages external process-based plugins for extraction, post-processing, chunking, and summarization:
+
+```rust
+struct PluginManager {
+    registry: PluginRegistry,   // Discovered plugins by kind
+    plugins_dir: PathBuf,       // Plugin discovery directory
+}
+
+struct PluginManifest {
+    name: String,
+    runner: RunnerConfig,       // command, args, timeout
+    capabilities: Capabilities, // kind, formats, priority
+}
+```
+
+Plugins are external executables (Python, Node.js, Bash, or compiled binaries) that communicate via JSON over stdin/stdout. See the [Plugin Guide](/guides/plugins) for details.
+
 ## reasondb-ingest
 
-The ingestion pipeline processes documents:
+The ingestion pipeline processes documents through plugin-driven stages:
 
 <Mermaid>
 {`flowchart LR
@@ -244,33 +278,38 @@ The ingestion pipeline processes documents:
         URL[URL]
     end
 
-    subgraph Extract["1. Extract"]
-        MarkItDown[MarkItDown]
-        PDFExtract[PDF Parser]
+    subgraph Extract["1. Extractor Plugin"]
+        MarkItDown[markitdown]
+        Custom[Custom Plugins]
     end
 
-    subgraph Chunk["2. Chunk"]
+    subgraph PostProc["2. Post-Process"]
+        PP[Post-Processor Plugins]
+    end
+
+    subgraph Chunk["3. Chunk"]
         Heading[By Headings]
         Semantic[Semantic Split]
     end
 
-    subgraph Build["3. Build Tree"]
+    subgraph Build["4. Build Tree"]
         Structure[Parse Structure]
         Nodes[Create Nodes]
     end
 
-    subgraph Summarize["4. Summarize"]
+    subgraph Summarize["5. Summarize"]
         LLM[LLM Calls]
         BottomUp[Bottom-Up]
     end
 
-    PDF --> PDFExtract
+    PDF --> MarkItDown
     MD --> MarkItDown
     HTML --> MarkItDown
     URL --> MarkItDown
+    MarkItDown --> PP
+    Custom --> PP
 
-    PDFExtract --> Heading
-    MarkItDown --> Heading
+    PP --> Heading
     Heading --> Structure
     Structure --> Nodes
     Nodes --> BottomUp
@@ -318,17 +357,23 @@ The HTTP server built with Axum:
 /v1/documents/:id    DELETE- Delete document
 /v1/documents/:id/nodes GET - Get nodes
 /v1/documents/:id/tree  GET - Get tree
+
+/v1/plugins          GET   - List plugins
+/v1/plugins/:name    GET   - Get plugin details
+/v1/plugins/:name/test POST - Test plugin
 ```
 
 ### Application State
 
 ```rust
 struct AppState<R: ReasoningEngine> {
-    store: NodeStore,        // Database connection
-    reasoner: Arc<R>,        // LLM provider
-    text_index: TextIndex,   // BM25 index
-    query_cache: QueryCache, // REASON query cache
-    config: ServerConfig,    // Server settings
+    store: NodeStore,                  // Database connection
+    reasoner: Arc<R>,                  // LLM provider
+    text_index: TextIndex,             // BM25 index
+    query_cache: QueryCache,           // REASON query cache
+    plugin_manager: Arc<PluginManager>,// Plugin system
+    job_queue: Arc<JobQueue>,          // Background ingestion queue
+    config: ServerConfig,              // Server settings
 }
 ```
 
@@ -390,10 +435,12 @@ struct AppState<R: ReasoningEngine> {
 |-----------|------------|-----------|
 | Storage | `redb` | Pure Rust, ACID, fast writes |
 | Text Index | `tantivy` | Rust Lucene, BM25 search |
+| Extraction | Plugin system | Process-based; Python, Node.js, Bash, binaries |
 | Serialization | `bincode` | Fast binary, zero-copy |
 | Async | `tokio` | Industry standard, parallel I/O |
 | HTTP | `axum` | Type-safe, ergonomic, fast |
 | LLM | `rig-core` | Multi-provider abstraction |
+| Docker | Alpine 3.21 | Minimal image with plugin runtimes |
 
 ## Performance Considerations
 

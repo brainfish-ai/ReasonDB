@@ -393,7 +393,9 @@ async fn process_job<R: ReasoningEngine + Clone + Send + Sync + 'static>(
         ..Default::default()
     };
 
-    let pipeline = IngestPipeline::new((*state.reasoner).clone()).with_config(config);
+    let pipeline = IngestPipeline::new((*state.reasoner).clone())
+        .with_config(config)
+        .with_plugins(state.plugin_manager.clone());
 
     let result = match &job.request {
         JobRequest::Text(req) => {

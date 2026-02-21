@@ -15,8 +15,8 @@ By the end of this guide, you'll have:
 ## Prerequisites
 
 <CardGroup cols={2}>
-  <Card title="Rust 1.70+" icon="gear">
-    Install from [rustup.rs](https://rustup.rs) if needed
+  <Card title="Docker (recommended)" icon="cube">
+    Or Rust 1.70+ to build from source
   </Card>
   <Card title="LLM API Key" icon="key">
     Anthropic (recommended), OpenAI, Gemini, or Cohere
@@ -25,73 +25,126 @@ By the end of this guide, you'll have:
 
 ## Installation
 
-<Steps>
-  <Step title="Clone and Build">
-    ```bash
-    git clone https://github.com/reasondb/reasondb.git
-    cd reasondb
-    cargo build --release
-    ```
-    
-    <Tip>
-    First build takes 2-3 minutes. Subsequent builds are fast.
-    </Tip>
-  </Step>
+Choose the method that works best for you:
 
-  <Step title="Configure Your LLM">
-    Run the interactive setup wizard:
+<Tabs>
+  <Tab title="Docker Compose (Recommended)">
+    <Steps>
+      <Step title="Clone the Repository">
+        ```bash
+        git clone https://github.com/reasondb/reasondb.git
+        cd reasondb
+        ```
+      </Step>
 
-    ```bash
-    ./target/release/reasondb config init
-    ```
+      <Step title="Configure Your LLM">
+        Create a `.env` file in the project root:
 
-    Or configure directly:
+        ```bash
+        cat > .env <<'EOF'
+        REASONDB_LLM_PROVIDER=anthropic
+        REASONDB_LLM_API_KEY=sk-ant-xxxxx
+        EOF
+        ```
 
-    ```bash
-    reasondb config set llm.provider anthropic
-    reasondb config set llm.api_key sk-ant-xxxxx
-    ```
+        <Accordion title="Supported LLM Providers">
+          | Provider | `REASONDB_LLM_PROVIDER` | Best For |
+          |----------|------------------------|----------|
+          | **Anthropic Claude** | `anthropic` | Best reasoning quality |
+          | **OpenAI GPT-4** | `openai` | Widely available |
+          | **Google Gemini** | `gemini` | Cost-effective |
+          | **Cohere** | `cohere` | Enterprise features |
+        </Accordion>
+      </Step>
 
-    <Accordion title="Supported LLM Providers">
-      | Provider | Config Value | Best For |
-      |----------|-------------|----------|
-      | **Anthropic Claude** | `anthropic` | Best reasoning quality |
-      | **OpenAI GPT-4** | `openai` | Widely available |
-      | **Google Gemini** | `gemini` | Cost-effective |
-      | **Cohere** | `cohere` | Enterprise features |
-    </Accordion>
+      <Step title="Start ReasonDB">
+        ```bash
+        docker compose up --build
+        ```
 
-    <Note>
-    Your API key is stored securely in `~/.config/reasondb/config.toml`—no environment variables needed.
-    </Note>
-  </Step>
+        The first build takes a few minutes (compiling Rust + installing Python dependencies). Subsequent starts are fast.
 
-  <Step title="Start the Server">
-    ```bash
-    reasondb serve
-    ```
+        <Tip>
+        Run `docker compose up --build -d` to start in the background, then `docker compose logs -f` to follow logs.
+        </Tip>
+      </Step>
 
-    You'll see:
-    ```
-      ____                            ____  ____  
-     |  _ \ ___  __ _ ___  ___  _ __ |  _ \| __ ) 
-     | |_) / _ \/ _` / __|/ _ \| '_ \| | | |  _ \ 
-     |  _ <  __/ (_| \__ \ (_) | | | | |_| | |_) |
-     |_| \_\___|\__,_|___/\___/|_| |_|____/|____/ 
+      <Step title="Verify It's Running">
+        ```bash
+        curl http://localhost:4444/health
+        # Returns: OK
+        ```
 
-    AI-Native Document Intelligence
-
-      Database: data/reasondb.redb
-      API: http://127.0.0.1:4444
-      Swagger UI: http://127.0.0.1:4444/swagger-ui/
-      LLM Provider: anthropic
-    ```
+        Swagger UI is available at **http://localhost:4444/swagger-ui/**
+      </Step>
+    </Steps>
 
     <Info>
-    Visit the Swagger UI to explore the full API interactively.
+    Docker Compose provides persistent data, plugin hot-reload, and automatic health-check restarts. Use `docker compose watch` during development for auto-rebuild on code changes.
     </Info>
-  </Step>
-</Steps>
+  </Tab>
+
+  <Tab title="Build from Source">
+    <Steps>
+      <Step title="Clone and Build">
+        ```bash
+        git clone https://github.com/reasondb/reasondb.git
+        cd reasondb
+        cargo build --release
+        ```
+
+        <Tip>
+        First build takes 2-3 minutes. Subsequent builds are fast.
+        </Tip>
+      </Step>
+
+      <Step title="Configure Your LLM">
+        Run the interactive setup wizard:
+
+        ```bash
+        ./target/release/reasondb config init
+        ```
+
+        Or configure directly:
+
+        ```bash
+        reasondb config set llm.provider anthropic
+        reasondb config set llm.api_key sk-ant-xxxxx
+        ```
+
+        <Note>
+        Your API key is stored securely in `~/.config/reasondb/config.toml`.
+        </Note>
+      </Step>
+
+      <Step title="Start the Server">
+        ```bash
+        reasondb serve
+        ```
+
+        You'll see:
+        ```
+          ____                            ____  ____  
+         |  _ \ ___  __ _ ___  ___  _ __ |  _ \| __ ) 
+         | |_) / _ \/ _` / __|/ _ \| '_ \| | | |  _ \ 
+         |  _ <  __/ (_| \__ \ (_) | | | | |_| | |_) |
+         |_| \_\___|\__,_|___/\___/|_| |_|____/|____/ 
+
+        AI-Native Document Intelligence
+
+          Database: data/reasondb.redb
+          API: http://127.0.0.1:4444
+          Swagger UI: http://127.0.0.1:4444/swagger-ui/
+          LLM Provider: anthropic
+        ```
+
+        <Info>
+        Visit the Swagger UI to explore the full API interactively.
+        </Info>
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
 
 ## Your First Intelligent Search
 
@@ -169,12 +222,11 @@ Each node has an LLM-generated summary enabling intelligent navigation.
 
 ### Step 3: Ask Questions
 
-Now the magic happens. Ask a natural language question:
+Now the magic happens. Use RQL to ask a natural language question:
 
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What algorithms are used for classification?"}'
+```sql
+SELECT * FROM knowledge_base
+REASON 'What algorithms are used for classification?'
 ```
 
 ```json
@@ -203,20 +255,20 @@ curl -X POST http://localhost:4444/v1/search \
 - You get a synthesized answer with confidence score
 - Stats show the reasoning process (4 nodes visited, 3 pruned)
 
-### Try More Questions
+### Try More Queries
 
-```bash
-# Cross-section question
-curl -X POST http://localhost:4444/v1/search \
-  -d '{"query": "What are the differences between supervised and unsupervised learning?"}'
+```sql
+-- Cross-section question
+SELECT * FROM knowledge_base
+REASON 'What are the differences between supervised and unsupervised learning?'
 
-# Specific detail
-curl -X POST http://localhost:4444/v1/search \
-  -d '{"query": "When would I use K-means clustering?"}'
+-- Keyword search (BM25, fast)
+SELECT * FROM knowledge_base SEARCH 'K-means clustering' LIMIT 5
 
-# Conceptual question
-curl -X POST http://localhost:4444/v1/search \
-  -d '{"query": "How does dimensionality reduction help with visualization?"}'
+-- Combine filters with reasoning
+SELECT * FROM knowledge_base
+WHERE tags CONTAINS 'unsupervised'
+REASON 'How does dimensionality reduction help with visualization?'
 ```
 
 ## Using the CLI
@@ -260,14 +312,14 @@ This returns the complete tree with all nodes, summaries, and relationships.
   <Card title="Ingestion Guide" icon="file-arrow-up" href="/guides/ingestion">
     Ingest PDFs, HTML, and other formats
   </Card>
+  <Card title="Plugins" icon="puzzle-piece" href="/guides/plugins">
+    Build custom extractors and processors
+  </Card>
   <Card title="Search Mastery" icon="magnifying-glass" href="/guides/search">
     Tune beam width, confidence thresholds, and more
   </Card>
-  <Card title="RQL Language" icon="terminal" href="/guides/rql">
-    Combine SQL-like queries with LLM reasoning
-  </Card>
-  <Card title="Authentication" icon="shield-check" href="/guides/authentication">
-    Secure your deployment with API keys
+  <Card title="Configuration" icon="gear" href="/guides/configuration">
+    Docker Compose, environment variables, and production setup
   </Card>
   <Card title="Tutorials" icon="book-open" href="/tutorials">
     Build real-world applications

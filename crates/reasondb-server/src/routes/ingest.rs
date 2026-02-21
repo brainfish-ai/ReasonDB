@@ -160,8 +160,9 @@ pub struct IngestUrlRequest {
 
 /// Ingest a file (multipart upload)
 ///
-/// Upload a document file for ingestion. Supports PDF, Word, Excel, PowerPoint,
-/// images (with OCR), audio files (with transcription), HTML, and more.
+/// Upload a document file for ingestion. Supported formats depend on the
+/// registered extractor plugins (e.g. the built-in `markitdown` plugin
+/// covers PDF, Word, Excel, PowerPoint, images, audio, HTML, and more).
 #[utoipa::path(
     post,
     path = "/v1/ingest/file",
@@ -251,7 +252,8 @@ pub async fn ingest_file<R: ReasoningEngine + Clone + Send + Sync + 'static>(
     };
 
     let pipeline = IngestPipeline::new((*state.reasoner).clone())
-        .with_config(config);
+        .with_config(config)
+        .with_plugins(state.plugin_manager.clone());
 
     let result = pipeline
         .ingest_and_store(&temp_path, &table_id, &state.store)

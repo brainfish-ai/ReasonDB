@@ -124,25 +124,24 @@ curl -X POST http://localhost:4444/v1/ingest/text \
 
 ### Find Papers by Topic
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT title, metadata.author, metadata.year FROM research_papers WHERE tags CONTAINS '\''transformers'\''"}'
+```sql
+SELECT title, metadata.author, metadata.year FROM research_papers
+WHERE tags CONTAINS 'transformers'
 ```
 
 ### Search by Keywords
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM research_papers SEARCH '\''attention mechanism self-attention'\''"}'
+```sql
+SELECT * FROM research_papers SEARCH 'attention mechanism self-attention'
 ```
 
 ## Step 4: Research Questions
 
 ### Compare Architectures
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM research_papers REASON '\''What are the key differences between BERT and GPT architectures?'\''"}'
+```sql
+SELECT * FROM research_papers
+REASON 'What are the key differences between BERT and GPT architectures?'
 ```
 
 **Example Response:**
@@ -160,23 +159,23 @@ curl -X POST http://localhost:4444/v1/query \
 
 ### Find Methodology Details
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM research_papers REASON '\''How does BERT handle bidirectional context?'\''"}'
+```sql
+SELECT * FROM research_papers
+REASON 'How does BERT handle bidirectional context?'
 ```
 
 ### Understand Results
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM research_papers REASON '\''What benchmarks were used to evaluate these models and what were the results?'\''"}'
+```sql
+SELECT * FROM research_papers
+REASON 'What benchmarks were used to evaluate these models and what were the results?'
 ```
 
 ### Explore Limitations
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM research_papers REASON '\''What are the limitations of large language models according to these papers?'\''"}'
+```sql
+SELECT * FROM research_papers
+REASON 'What are the limitations of large language models according to these papers?'
 ```
 
 ## Step 5: Synthesize Findings
@@ -185,23 +184,24 @@ Ask questions that require understanding multiple papers:
 
 ### Evolution of Techniques
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM research_papers ORDER BY metadata.year REASON '\''How has the approach to NLP evolved from Transformers to GPT-3?'\''"}'
+```sql
+SELECT * FROM research_papers
+ORDER BY metadata.year
+REASON 'How has the approach to NLP evolved from Transformers to GPT-3?'
 ```
 
 ### Common Themes
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM research_papers REASON '\''What training techniques are commonly used across these papers?'\''"}'
+```sql
+SELECT * FROM research_papers
+REASON 'What training techniques are commonly used across these papers?'
 ```
 
 ### Model Sizes Over Time
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM research_papers REASON '\''How have model sizes changed from the original Transformer to GPT-3?'\''"}'
+```sql
+SELECT * FROM research_papers
+REASON 'How have model sizes changed from the original Transformer to GPT-3?'
 ```
 
 ## Step 6: Research Workflow
@@ -210,34 +210,29 @@ Build a complete research workflow:
 
 ### Step 1: Find Relevant Papers
 
-```bash
-# Search for papers about attention
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT title, metadata.year FROM research_papers SEARCH '\''attention mechanism'\''"}'
+```sql
+SELECT title, metadata.year FROM research_papers SEARCH 'attention mechanism'
 ```
 
 ### Step 2: Understand Key Concepts
 
-```bash
-# Get explanation of multi-head attention
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM research_papers REASON '\''Explain multi-head attention and why it is used'\''"}'
+```sql
+SELECT * FROM research_papers
+REASON 'Explain multi-head attention and why it is used'
 ```
 
 ### Step 3: Compare Approaches
 
-```bash
-# Compare pre-training methods
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM research_papers REASON '\''Compare the pre-training objectives of BERT and GPT'\''"}'
+```sql
+SELECT * FROM research_papers
+REASON 'Compare the pre-training objectives of BERT and GPT'
 ```
 
 ### Step 4: Find Gaps
 
-```bash
-# Identify limitations and future work
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM research_papers REASON '\''What limitations do these papers identify and what future work do they suggest?'\''"}'
+```sql
+SELECT * FROM research_papers
+REASON 'What limitations do these papers identify and what future work do they suggest?'
 ```
 
 ## Step 7: Advanced Analysis
@@ -246,23 +241,24 @@ curl -X POST http://localhost:4444/v1/query \
 
 Sort by citations for influential papers:
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT title, metadata.citations FROM research_papers ORDER BY metadata.citations DESC"}'
+```sql
+SELECT title, metadata.citations FROM research_papers
+ORDER BY metadata.citations DESC
 ```
 
 ### Filter by Year Range
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM research_papers WHERE metadata.year >= 2019 REASON '\''What are the latest advances in language models?'\''"}'
+```sql
+SELECT * FROM research_papers
+WHERE metadata.year >= 2019
+REASON 'What are the latest advances in language models?'
 ```
 
 ### Aggregate by Topic
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT COUNT(*) AS count, metadata.topic FROM research_papers GROUP BY metadata.topic"}'
+```sql
+SELECT COUNT(*) AS count, metadata.topic FROM research_papers
+GROUP BY metadata.topic
 ```
 
 ## Challenges

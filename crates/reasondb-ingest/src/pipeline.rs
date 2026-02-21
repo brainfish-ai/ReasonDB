@@ -1,18 +1,20 @@
 //! Document ingestion pipeline
 //!
 //! Orchestrates the complete document ingestion process:
-//! 1. Extract text/markdown from documents (via MarkItDown or native extractors)
+//! 1. Extract text/markdown from documents (via extractor plugins)
 //! 2. Chunk into semantic segments
 //! 3. Build hierarchical tree
 //! 4. Generate summaries
 //! 5. Store in database
 
 use std::path::Path;
-use tracing::{debug, info};
+use std::sync::Arc;
+use tracing::{debug, info, warn};
 
 use reasondb_core::llm::ReasoningEngine;
 use reasondb_core::model::{Document, PageNode};
 use reasondb_core::NodeStore;
+use reasondb_plugin::PluginManager;
 
 use crate::chunker::{ChunkerConfig, SemanticChunker};
 use crate::error::{IngestError, Result};
@@ -88,6 +90,7 @@ pub struct IngestPipeline<R: ReasoningEngine> {
     chunker: SemanticChunker,
     tree_builder: TreeBuilder,
     reasoner: Option<R>,
+    plugin_manager: Option<Arc<PluginManager>>,
 }
 
 impl<R: ReasoningEngine> IngestPipeline<R> {
@@ -99,6 +102,7 @@ impl<R: ReasoningEngine> IngestPipeline<R> {
             chunker: SemanticChunker::default(),
             tree_builder: TreeBuilder::new(),
             reasoner: Some(reasoner),
+            plugin_manager: None,
         }
     }
 
@@ -113,13 +117,18 @@ impl<R: ReasoningEngine> IngestPipeline<R> {
             chunker: SemanticChunker::default(),
             tree_builder: TreeBuilder::new(),
             reasoner: None,
+            plugin_manager: None,
         }
     }
 
-    /// Ingest any supported file using MarkItDown (if available) or native extractors
-    ///
-    /// Supports: PDF, Word, PowerPoint, Excel, Images (OCR), Audio (transcription),
-    /// HTML, CSV, JSON, XML, EPUB, ZIP files
+    /// Attach a plugin manager for plugin-based pipeline stages
+    pub fn with_plugins(mut self, manager: Arc<PluginManager>) -> Self {
+        self.extractor = self.extractor.with_plugin_manager(Arc::clone(&manager));
+        self.plugin_manager = Some(manager);
+        self
+    }
+
+    /// Ingest a file using registered extractor plugins.
     ///
     /// The `table_id` must reference an existing table in the database.
     pub async fn ingest_file<P: AsRef<Path>>(&self, path: P, table_id: &str) -> Result<IngestResult> {
@@ -198,7 +207,13 @@ impl<R: ReasoningEngine> IngestPipeline<R> {
         })
     }
 
-    /// Process extracted markdown content into a document tree
+    /// Process extracted markdown content into a document tree.
+    ///
+    /// Pipeline stages:
+    /// 1. Post-processor plugins (chain, if any registered)
+    /// 2. Chunk (plugin chunker or built-in SemanticChunker)
+    /// 3. Build tree
+    /// 4. Summarize (plugin summarizer or built-in LLM summarizer)
     async fn process_markdown(
         &self,
         title: &str,
@@ -206,9 +221,70 @@ impl<R: ReasoningEngine> IngestPipeline<R> {
         markdown: &str,
         stats: &mut IngestStats,
     ) -> Result<(Document, Vec<PageNode>)> {
-        // Chunk the markdown
+        let mut processed_markdown = markdown.to_string();
+
+        // 1. Run post-processor plugins (chain) if any registered
+        if let Some(ref pm) = self.plugin_manager {
+            if pm.has_post_processors() {
+                debug!("Running post-processor plugins");
+                match pm.run_post_processors(&processed_markdown, &std::collections::HashMap::new()) {
+                    Ok(result) => {
+                        processed_markdown = result.markdown;
+                        debug!("Post-processing complete, {} chars", processed_markdown.len());
+                    }
+                    Err(e) => {
+                        warn!("Post-processor plugin failed, using original markdown: {}", e);
+                    }
+                }
+            }
+        }
+
+        // 2. Chunk (plugin chunker or built-in SemanticChunker)
         let chunking_start = std::time::Instant::now();
-        let chunks = self.chunker.chunk_text(markdown)?;
+        let chunks = if let Some(ref pm) = self.plugin_manager {
+            if pm.has_chunker() {
+                debug!("Using plugin chunker");
+                let config = reasondb_plugin::ChunkConfig {
+                    target_chunk_size: self.config.chunker.target_chunk_size,
+                    min_chunk_size: self.config.chunker.min_chunk_size,
+                    max_chunk_size: self.config.chunker.max_chunk_size,
+                    overlap: 100,
+                };
+                match pm.chunk(&processed_markdown, &config) {
+                    Ok(result) => {
+                        result
+                            .chunks
+                            .into_iter()
+                            .map(|c| {
+                                let word_count = c.content.split_whitespace().count();
+                                crate::chunker::TextChunk {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    content: c.content,
+                                    heading: c.heading.map(|text| crate::chunker::DetectedHeading {
+                                        text,
+                                        level: c.level,
+                                        offset: 0,
+                                        page_number: None,
+                                    }),
+                                    char_count: c.char_count,
+                                    word_count,
+                                    start_page: None,
+                                    end_page: None,
+                                }
+                            })
+                            .collect()
+                    }
+                    Err(e) => {
+                        warn!("Plugin chunker failed, falling back to built-in: {}", e);
+                        self.chunker.chunk_text(&processed_markdown)?
+                    }
+                }
+            } else {
+                self.chunker.chunk_text(&processed_markdown)?
+            }
+        } else {
+            self.chunker.chunk_text(&processed_markdown)?
+        };
         stats.chunking_time_ms = chunking_start.elapsed().as_millis() as u64;
         stats.chunks_created = chunks.len();
 
@@ -217,21 +293,47 @@ impl<R: ReasoningEngine> IngestPipeline<R> {
             stats.chunks_created, stats.chunking_time_ms
         );
 
-        // Build tree
+        // 3. Build tree
         let (document, mut nodes) = self.tree_builder.build(title, table_id, chunks)?;
         stats.nodes_created = nodes.len();
 
-        // Generate summaries
+        // 4. Summarize (plugin summarizer or built-in LLM summarizer)
         if self.config.generate_summaries {
             let summarization_start = std::time::Instant::now();
 
-            if let Some(ref reasoner) = self.reasoner {
-                let summarizer = NodeSummarizer::new(reasoner);
-                summarizer.summarize_tree(&mut nodes).await?;
-                stats.summaries_generated = nodes.len();
-            } else {
-                MockSummarizer::summarize_tree(&mut nodes);
-                stats.summaries_generated = nodes.len();
+            let mut used_plugin = false;
+            if let Some(ref pm) = self.plugin_manager {
+                if pm.has_summarizer() {
+                    debug!("Using plugin summarizer");
+                    for node in &mut nodes {
+                        if let Some(ref content) = node.content {
+                            let context = std::collections::HashMap::from([
+                                ("title".to_string(), node.title.clone()),
+                            ]);
+                            match pm.summarize(content, &context) {
+                                Ok(result) => {
+                                    node.summary = result.summary;
+                                }
+                                Err(e) => {
+                                    warn!("Plugin summarizer failed for node '{}': {}", node.title, e);
+                                }
+                            }
+                        }
+                    }
+                    stats.summaries_generated = nodes.len();
+                    used_plugin = true;
+                }
+            }
+
+            if !used_plugin {
+                if let Some(ref reasoner) = self.reasoner {
+                    let summarizer = NodeSummarizer::new(reasoner);
+                    summarizer.summarize_tree(&mut nodes).await?;
+                    stats.summaries_generated = nodes.len();
+                } else {
+                    MockSummarizer::summarize_tree(&mut nodes);
+                    stats.summaries_generated = nodes.len();
+                }
             }
 
             stats.summarization_time_ms = summarization_start.elapsed().as_millis() as u64;
@@ -396,6 +498,7 @@ impl ReasoningEngine for NoOpReasoner {
 pub struct PipelineBuilder<R: ReasoningEngine> {
     reasoner: Option<R>,
     config: PipelineConfig,
+    plugin_manager: Option<Arc<PluginManager>>,
 }
 
 impl<R: ReasoningEngine> PipelineBuilder<R> {
@@ -404,6 +507,7 @@ impl<R: ReasoningEngine> PipelineBuilder<R> {
         PipelineBuilder {
             reasoner: None,
             config: PipelineConfig::default(),
+            plugin_manager: None,
         }
     }
 
@@ -412,7 +516,14 @@ impl<R: ReasoningEngine> PipelineBuilder<R> {
         PipelineBuilder {
             reasoner: Some(reasoner),
             config: self.config,
+            plugin_manager: self.plugin_manager,
         }
+    }
+
+    /// Attach a plugin manager
+    pub fn with_plugins(mut self, manager: Arc<PluginManager>) -> Self {
+        self.plugin_manager = Some(manager);
+        self
     }
 
     /// Configure chunk size
@@ -440,12 +551,18 @@ impl<R: ReasoningEngine> PipelineBuilder<R> {
     where
         R: ReasoningEngine,
     {
+        let mut extractor = SmartExtractor::new();
+        if let Some(ref pm) = self.plugin_manager {
+            extractor = extractor.with_plugin_manager(Arc::clone(pm));
+        }
+
         IngestPipeline {
             config: self.config.clone(),
-            extractor: SmartExtractor::new(),
+            extractor,
             chunker: SemanticChunker::new(self.config.chunker),
             tree_builder: TreeBuilder::new(),
             reasoner: self.reasoner,
+            plugin_manager: self.plugin_manager,
         }
     }
 }

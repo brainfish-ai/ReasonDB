@@ -1,0 +1,18 @@
+[plugin]
+name = "markitdown"
+version = "0.1.0"
+description = "Extract documents and URLs via Microsoft MarkItDown"
+author = "ReasonDB"
+license = "MIT"
+
+[plugin.runner]
+command = "python3"
+args = ["wrapper.py"]
+timeout_secs = 120
+
+[plugin.capabilities]
+kind = "extractor"
+formats = ["pdf", "docx", "doc", "pptx", "ppt", "xlsx", "xls", "html", "htm", "txt", "md", "rst", "csv", "json", "xml", "epub", "jpg", "jpeg", "png", "gif", "bmp", "webp", "wav", "mp3", "m4a", "ogg", "flac", "zip", "msg", "eml"]
+handles_urls = true
+url_patterns = ["*"]
+priority = 200

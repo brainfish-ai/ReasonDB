@@ -6,6 +6,7 @@ services:
       - "4444:4444"
     volumes:
       - reasondb_data:/data
+      - ./plugins:/plugins
     environment:
       REASONDB_HOST: "0.0.0.0"
       REASONDB_PORT: "4444"
@@ -17,6 +18,7 @@ services:
       REASONDB_RATE_LIMIT_RPH: "5000"
       REASONDB_RATE_LIMIT_BURST: "30"
       REASONDB_WORKER_COUNT: "2"
+      REASONDB_PLUGINS_DIR: "/plugins"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4444/health"]
       interval: 10s
@@ -32,6 +34,9 @@ services:
           path: ./Cargo.toml
         - action: rebuild
           path: ./Cargo.lock
+        - action: sync
+          path: ./plugins
+          target: /plugins
 
 volumes:
   reasondb_data:

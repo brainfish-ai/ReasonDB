@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 reasondb-core = { path = "../reasondb-core" }
 reasondb-ingest = { path = "../reasondb-ingest" }
+reasondb-plugin = { path = "../reasondb-plugin" }
 
 # Storage (for shared database)
 redb.workspace = true

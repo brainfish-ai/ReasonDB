@@ -5,10 +5,6 @@ use thiserror::Error;
 /// Errors that can occur during document ingestion
 #[derive(Error, Debug)]
 pub enum IngestError {
-    /// PDF parsing failed
-    #[error("PDF parsing error: {0}")]
-    PdfParse(String),
-
     /// File I/O error
     #[error("File error: {0}")]
     FileIO(#[from] std::io::Error),

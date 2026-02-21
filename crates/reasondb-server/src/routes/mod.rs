@@ -8,6 +8,7 @@ pub mod cluster;
 pub mod documents;
 pub mod ingest;
 pub mod jobs;
+pub mod plugins;
 pub mod query;
 pub mod relations;
 pub mod search;
@@ -80,6 +81,10 @@ fn v1_routes<R: ReasoningEngine + Clone + Send + Sync + 'static>(state: Arc<AppS
         .nest("/cluster", cluster::cluster_routes::<R>())
         // Backup & Recovery
         .nest("", backup::routes::<R>())
+        // Plugins
+        .route("/plugins", get(plugins::list_plugins::<R>))
+        .route("/plugins/:name", get(plugins::get_plugin::<R>))
+        .route("/plugins/:name/test", post(plugins::test_plugin::<R>))
         // State
         .with_state(state)
 }

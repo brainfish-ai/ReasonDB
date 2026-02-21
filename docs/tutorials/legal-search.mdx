@@ -156,41 +156,34 @@ curl -X POST http://localhost:4444/v1/ingest/text \
 
 ### List All Contracts
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT title, metadata.contract_type, metadata.value_usd FROM contracts"}'
+```sql
+SELECT title, metadata.contract_type, metadata.value_usd FROM contracts
 ```
 
 ### Filter by Contract Type
 
-```bash
-# Find all NDAs
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM contracts WHERE metadata.contract_type = '\''nda'\''"}'
+```sql
+SELECT * FROM contracts WHERE metadata.contract_type = 'nda'
 ```
 
 ### Filter by Value
 
-```bash
-# High-value contracts (> $100k)
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT title, metadata.value_usd FROM contracts WHERE metadata.value_usd > 100000"}'
+```sql
+-- High-value contracts (> $100k)
+SELECT title, metadata.value_usd FROM contracts
+WHERE metadata.value_usd > 100000
 ```
 
 ## Step 4: Keyword Search
 
 Search for specific terms across all contracts:
 
-```bash
-# Find contracts mentioning "termination"
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM contracts SEARCH '\''termination notice'\''"}'
-```
+```sql
+-- Find contracts mentioning "termination"
+SELECT * FROM contracts SEARCH 'termination notice'
 
-```bash
-# Find contracts about "confidential information"
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM contracts SEARCH '\''confidential information disclosure'\''"}'
+-- Find contracts about "confidential information"
+SELECT * FROM contracts SEARCH 'confidential information disclosure'
 ```
 
 ## Step 5: Intelligent Legal Questions
@@ -199,9 +192,8 @@ Now let's use REASON for complex legal questions:
 
 ### Extract Termination Clauses
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM contracts REASON '\''What are the termination notice periods for each contract?'\''"}'
+```sql
+SELECT * FROM contracts REASON 'What are the termination notice periods for each contract?'
 ```
 
 **Response:**
@@ -229,71 +221,73 @@ curl -X POST http://localhost:4444/v1/query \
 
 ### Understand Liability Limits
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM contracts WHERE metadata.contract_type = '\''msa'\'' REASON '\''What are the liability limitations and caps?'\''"}'
+```sql
+SELECT * FROM contracts
+WHERE metadata.contract_type = 'msa'
+REASON 'What are the liability limitations and caps?'
 ```
 
 ### Find Confidentiality Obligations
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM contracts REASON '\''What are our confidentiality obligations and how long do they last?'\''"}'
+```sql
+SELECT * FROM contracts
+REASON 'What are our confidentiality obligations and how long do they last?'
 ```
 
 ### Compare Payment Terms
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM contracts REASON '\''What are the payment terms and what happens if payment is late?'\''"}'
+```sql
+SELECT * FROM contracts
+REASON 'What are the payment terms and what happens if payment is late?'
 ```
 
 ## Step 6: Advanced Analysis
 
 ### Contract Portfolio Summary
 
-```bash
-# Count contracts by type
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT COUNT(*) AS count, metadata.contract_type FROM contracts GROUP BY metadata.contract_type"}'
+```sql
+-- Count contracts by type
+SELECT COUNT(*) AS count, metadata.contract_type
+FROM contracts
+GROUP BY metadata.contract_type
 ```
 
 ### Total Contract Value
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT SUM(metadata.value_usd) AS total_value FROM contracts"}'
+```sql
+SELECT SUM(metadata.value_usd) AS total_value FROM contracts
 ```
 
 ### Combined Filter + Reason
 
 Find specific contract types and extract key terms:
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM contracts WHERE tags CONTAINS '\''active'\'' AND metadata.value_usd > 0 REASON '\''What are our key financial obligations?'\''"}'
+```sql
+SELECT * FROM contracts
+WHERE tags CONTAINS 'active' AND metadata.value_usd > 0
+REASON 'What are our key financial obligations?'
 ```
 
 ## Step 7: Building a Contract Review Workflow
 
 Here's a complete workflow for reviewing a new contract:
 
-```bash
-# 1. Check for similar existing contracts
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT title, metadata.contract_type FROM contracts WHERE metadata.contract_type = '\''msa'\''"}'
+```sql
+-- 1. Check for similar existing contracts
+SELECT title, metadata.contract_type FROM contracts
+WHERE metadata.contract_type = 'msa'
 
-# 2. Search for relevant precedents
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM contracts SEARCH '\''service level agreement uptime'\''"}'
+-- 2. Search for relevant precedents
+SELECT * FROM contracts SEARCH 'service level agreement uptime'
 
-# 3. Compare liability clauses
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM contracts WHERE metadata.contract_type = '\''msa'\'' REASON '\''What liability caps and limitations have we agreed to in the past?'\''"}'
+-- 3. Compare liability clauses
+SELECT * FROM contracts
+WHERE metadata.contract_type = 'msa'
+REASON 'What liability caps and limitations have we agreed to in the past?'
 
-# 4. Check standard termination terms
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM contracts REASON '\''What termination provisions are standard in our contracts?'\''"}'
+-- 4. Check standard termination terms
+SELECT * FROM contracts
+REASON 'What termination provisions are standard in our contracts?'
 ```
 
 ## Challenges
@@ -301,26 +295,29 @@ curl -X POST http://localhost:4444/v1/query \
 <AccordionGroup>
   <Accordion title="Challenge 1: Find contracts expiring soon">
     Find all contracts and ask when they expire or renew:
-    ```bash
-    curl -X POST http://localhost:4444/v1/query \
-      -d '{"query": "SELECT * FROM contracts REASON '\''When does each contract expire or come up for renewal?'\''"}'
-    ```
+
+```sql
+SELECT * FROM contracts
+REASON 'When does each contract expire or come up for renewal?'
+```
   </Accordion>
 
   <Accordion title="Challenge 2: Compare non-compete clauses">
     Extract and compare non-compete terms:
-    ```bash
-    curl -X POST http://localhost:4444/v1/query \
-      -d '{"query": "SELECT * FROM contracts REASON '\''What non-compete or non-solicitation clauses exist and what are their terms?'\''"}'
-    ```
+
+```sql
+SELECT * FROM contracts
+REASON 'What non-compete or non-solicitation clauses exist and what are their terms?'
+```
   </Accordion>
 
   <Accordion title="Challenge 3: Identify high-risk clauses">
     Ask the LLM to identify potentially risky terms:
-    ```bash
-    curl -X POST http://localhost:4444/v1/query \
-      -d '{"query": "SELECT * FROM contracts REASON '\''What clauses might be considered high-risk or unfavorable to Acme Corp?'\''"}'
-    ```
+
+```sql
+SELECT * FROM contracts
+REASON 'What clauses might be considered high-risk or unfavorable to Acme Corp?'
+```
   </Accordion>
 </AccordionGroup>
 

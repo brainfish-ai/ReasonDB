@@ -28,6 +28,7 @@
               "guides/rql",
               "guides/tables",
               "guides/relationships",
+              "guides/plugins",
               "guides/configuration",
               "guides/authentication",
               "guides/rate-limiting",

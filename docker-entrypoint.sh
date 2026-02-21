@@ -4,7 +4,7 @@ set -Eeo pipefail
 if [ "$(id -u)" = '0' ]; then
     mkdir -p /data
     chown -R reasondb:reasondb /data
-    exec gosu reasondb "$BASH_SOURCE" "$@"
+    exec su-exec reasondb "$BASH_SOURCE" "$@"
 fi
 
 # If the first argument looks like a flag, prepend the server binary.

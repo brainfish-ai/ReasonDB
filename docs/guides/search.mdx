@@ -9,10 +9,8 @@ ReasonDB search is fundamentally different. Instead of returning "similar" chunk
 
 Ask a question. Get an answer.
 
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What are the late payment penalties?"}'
+```sql
+SELECT * FROM contracts REASON 'What are the late payment penalties?'
 ```
 
 ```json
@@ -86,45 +84,26 @@ Fine-tune search behavior for your use case:
 
 ### Search a Specific Table
 
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -d '{
-    "query": "confidentiality obligations",
-    "table_id": "tbl_legal_contracts"
-  }'
-```
-
-### Search a Single Document
-
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -d '{
-    "query": "What is the notice period?",
-    "document_id": "doc_employment_agreement"
-  }'
+```sql
+SELECT * FROM legal_contracts
+REASON 'What are the confidentiality obligations?'
 ```
 
 ### Filter by Metadata
 
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -d '{
-    "query": "liability limits",
-    "metadata": {
-      "contract_type": "service_agreement",
-      "status": "active"
-    }
-  }'
+```sql
+SELECT * FROM legal_contracts
+WHERE metadata.contract_type = 'service_agreement'
+  AND metadata.status = 'active'
+REASON 'What are the liability limits?'
 ```
 
 ### Filter by Tags
 
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -d '{
-    "query": "intellectual property rights",
-    "tags": ["nda", "confidential"]
-  }'
+```sql
+SELECT * FROM legal_contracts
+WHERE tags CONTAINS ANY ('nda', 'confidential')
+REASON 'What are the intellectual property rights?'
 ```
 
 ## Tuning for Quality vs Speed
@@ -133,45 +112,27 @@ curl -X POST http://localhost:4444/v1/search \
 
 **Low beam width (1-2)**: Fast, focused. Best for specific factual questions.
 
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -d '{"query": "What is the contract effective date?", "beam_width": 1}'
+```sql
+-- Narrow search for a factual question
+SELECT * FROM contracts REASON 'What is the contract effective date?' LIMIT 1
 ```
 
 **High beam width (4-5)**: Thorough, slower. Best for complex questions with multiple relevant sections.
 
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -d '{"query": "What are all the ways this contract can be terminated?", "beam_width": 5}'
+```sql
+-- Broad search for a question that spans multiple sections
+SELECT * FROM contracts REASON 'What are all the ways this contract can be terminated?' LIMIT 10
 ```
 
-### Min Confidence: Pruning Aggressiveness
-
-**High threshold (0.5+)**: Aggressive pruning, faster, might miss edge cases.
-
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -d '{"query": "...", "min_confidence": 0.5}'
-```
-
-**Low threshold (0.2)**: Explores more branches, slower, more comprehensive.
-
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -d '{"query": "...", "min_confidence": 0.2}'
-```
+<Tip>
+Beam width is configured server-side or via the search API. In RQL, use `LIMIT` to control result count, and configure `beam_width` in your server configuration or search endpoint.
+</Tip>
 
 ### Max Depth: How Deep to Go
 
-```bash
-# High-level overview (fast)
-curl -X POST http://localhost:4444/v1/search \
-  -d '{"query": "...", "max_depth": 3}'
-
-# Detailed deep search (thorough)
-curl -X POST http://localhost:4444/v1/search \
-  -d '{"query": "...", "max_depth": 15}'
-```
+Control traversal depth for speed vs thoroughness:
+- **Shallow (3)**: High-level overview, fast
+- **Deep (15)**: Detailed, thorough search into nested subsections
 
 ## Understanding Results
 
@@ -217,27 +178,30 @@ You know exactly which sections the LLM traversed. This is invaluable for:
 - **content**: The raw text from the document
 - **answer**: LLM-synthesized response to your specific question
 
-## Search vs RQL Queries
+## SEARCH vs REASON in RQL
 
-| Need | Use |
-|------|-----|
-| Natural language question | `POST /v1/search` |
-| Filter + keyword search | `POST /v1/query` with `SEARCH` |
-| Filter + LLM reasoning | `POST /v1/query` with `REASON` |
-| Aggregations | `POST /v1/query` |
+| Need | RQL Clause | Speed |
+|------|-----------|-------|
+| Known keywords | `SEARCH 'terms'` | Fast (~50ms) |
+| Natural language question | `REASON 'question'` | Slower (~2-5s) |
+| Filter + keyword search | `WHERE ... SEARCH '...'` | Fast |
+| Filter + LLM reasoning | `WHERE ... REASON '...'` | Slower |
+| Both together | `WHERE ... SEARCH '...' REASON '...'` | Medium |
 
-### Combining Filters with Reasoning
+### Combining Everything
 
-For complex scenarios, use RQL with the REASON clause:
+Filter first (fast), then reason over the filtered set (thorough):
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{
-    "query": "SELECT * FROM \"Legal Contracts\" WHERE metadata.status = '\''active'\'' AND metadata.value_usd > 100000 REASON '\''What are the termination conditions?'\'' LIMIT 5"
-  }'
+```sql
+SELECT * FROM legal_contracts
+WHERE metadata.status = 'active'
+  AND metadata.value_usd > 100000
+SEARCH 'termination clause'
+REASON 'What are the exit conditions?'
+LIMIT 5
 ```
 
-This filters first (fast), then reasons over the filtered set (thorough).
+This narrows results with metadata, then keyword-matches, then applies LLM reasoning to the remaining documents.
 
 ## Performance Optimization
 
@@ -260,37 +224,27 @@ This filters first (fast), then reasons over the filtered set (thorough).
 
 ### Q&A Bot
 
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -d '{
-    "query": "How do I reset my password?",
-    "table_id": "tbl_support_docs",
-    "beam_width": 2,
-    "limit": 1
-  }'
+```sql
+SELECT * FROM support_docs
+REASON 'How do I reset my password?'
+LIMIT 1
 ```
 
 ### Research Assistant
 
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -d '{
-    "query": "What methods have been used for sentiment analysis?",
-    "table_id": "tbl_research_papers",
-    "beam_width": 4,
-    "limit": 5
-  }'
+```sql
+SELECT * FROM research_papers
+WHERE tags CONTAINS 'machine-learning'
+REASON 'What methods have been used for sentiment analysis?'
+LIMIT 5
 ```
 
 ### Contract Analyzer
 
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -d '{
-    "query": "What are the indemnification obligations?",
-    "document_id": "doc_master_service_agreement",
-    "beam_width": 3
-  }'
+```sql
+SELECT * FROM legal_contracts
+WHERE metadata.contract_type = 'msa'
+REASON 'What are the indemnification obligations?'
 ```
 
 ## Next Steps

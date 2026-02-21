@@ -77,10 +77,8 @@ In this tutorial, you'll master RQL (ReasonDB Query Language) by building querie
 
 The simplest query selects all documents from a table:
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "SELECT * FROM books"}'
+```sql
+SELECT * FROM books
 ```
 
 **Response:**
@@ -100,9 +98,8 @@ curl -X POST http://localhost:4444/v1/query \
 
 You can select only the fields you need:
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT title, metadata.author FROM books"}'
+```sql
+SELECT title, metadata.author FROM books
 ```
 
 <Tip>
@@ -115,9 +112,8 @@ Selecting fewer fields can improve performance for large result sets.
 
 Find books by a specific author:
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM books WHERE metadata.author = '\''James Morrison'\''"}'
+```sql
+SELECT * FROM books WHERE metadata.author = 'James Morrison'
 ```
 
 **Result:** Returns "The Quantum Garden" and "Mars Colony One"
@@ -126,9 +122,8 @@ curl -X POST http://localhost:4444/v1/query \
 
 Find highly-rated books:
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT title, metadata.rating FROM books WHERE metadata.rating > 4.3"}'
+```sql
+SELECT title, metadata.rating FROM books WHERE metadata.rating > 4.3
 ```
 
 **Result:** Returns books with rating > 4.3
@@ -137,9 +132,8 @@ curl -X POST http://localhost:4444/v1/query \
 
 Find books with a specific tag:
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM books WHERE tags CONTAINS '\''science-fiction'\''"}'
+```sql
+SELECT * FROM books WHERE tags CONTAINS 'science-fiction'
 ```
 
 **Result:** Returns the two sci-fi books
@@ -148,29 +142,27 @@ curl -X POST http://localhost:4444/v1/query \
 
 Use AND/OR for complex filters:
 
-```bash
-# Science fiction books by James Morrison
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM books WHERE metadata.author = '\''James Morrison'\'' AND tags CONTAINS '\''science-fiction'\''"}'
+```sql
+-- Science fiction books by James Morrison
+SELECT * FROM books
+WHERE metadata.author = 'James Morrison' AND tags CONTAINS 'science-fiction'
 ```
 
 ### Pattern Matching
 
 Use LIKE for partial matches:
 
-```bash
-# Titles containing "The"
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM books WHERE title LIKE '\''The%'\''"}'
+```sql
+-- Titles starting with "The"
+SELECT * FROM books WHERE title LIKE 'The%'
 ```
 
 ## Part 3: Full-Text Search with SEARCH
 
 The SEARCH clause uses BM25 for fast keyword matching:
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM books SEARCH '\''quantum computing'\''"}'
+```sql
+SELECT * FROM books SEARCH 'quantum computing'
 ```
 
 **Response:**
@@ -191,9 +183,10 @@ curl -X POST http://localhost:4444/v1/query \
 
 Filter first, then search:
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM books WHERE metadata.author = '\''James Morrison'\'' SEARCH '\''Mars survival'\''"}'
+```sql
+SELECT * FROM books
+WHERE metadata.author = 'James Morrison'
+SEARCH 'Mars survival'
 ```
 
 <Note>
@@ -204,9 +197,8 @@ SEARCH is fast (~50ms) because it uses a pre-built BM25 index. Use it for keywor
 
 The REASON clause uses an LLM to understand your question and extract answers:
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM books REASON '\''What book deals with artificial consciousness?'\''"}'
+```sql
+SELECT * FROM books REASON 'What book deals with artificial consciousness?'
 ```
 
 **Response:**
@@ -227,37 +219,35 @@ curl -X POST http://localhost:4444/v1/query \
 
 REASON excels at understanding complex questions:
 
-```bash
-# Find books about isolation
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM books REASON '\''Which books explore themes of isolation or being cut off?'\''"}'
+```sql
+SELECT * FROM books
+REASON 'Which books explore themes of isolation or being cut off?'
 ```
 
 ### Combine Everything
 
 The most powerful queries combine WHERE, SEARCH, and REASON:
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM books WHERE tags CONTAINS '\''science-fiction'\'' REASON '\''What ethical dilemmas do the protagonists face?'\''"}'
+```sql
+SELECT * FROM books
+WHERE tags CONTAINS 'science-fiction'
+REASON 'What ethical dilemmas do the protagonists face?'
 ```
 
 ## Part 5: Aggregations
 
 ### Count Documents
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT COUNT(*) FROM books"}'
+```sql
+SELECT COUNT(*) FROM books
 ```
 
 ### Group By
 
 Count books per author:
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT COUNT(*) AS book_count, metadata.author FROM books GROUP BY metadata.author"}'
+```sql
+SELECT COUNT(*) AS book_count, metadata.author FROM books GROUP BY metadata.author
 ```
 
 **Response:**
@@ -272,31 +262,27 @@ curl -X POST http://localhost:4444/v1/query \
 
 ### Average Rating
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT AVG(metadata.rating) AS avg_rating FROM books"}'
+```sql
+SELECT AVG(metadata.rating) AS avg_rating FROM books
 ```
 
 ## Part 6: Sorting and Pagination
 
 ### Order Results
 
-```bash
-# Sort by rating descending
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM books ORDER BY metadata.rating DESC"}'
+```sql
+-- Sort by rating descending
+SELECT * FROM books ORDER BY metadata.rating DESC
 ```
 
 ### Paginate Results
 
-```bash
-# First page (2 results)
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM books ORDER BY title LIMIT 2"}'
+```sql
+-- First page (2 results)
+SELECT * FROM books ORDER BY title LIMIT 2
 
-# Second page
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM books ORDER BY title LIMIT 2 OFFSET 2"}'
+-- Second page
+SELECT * FROM books ORDER BY title LIMIT 2 OFFSET 2
 ```
 
 ## Challenges

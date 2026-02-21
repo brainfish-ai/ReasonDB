@@ -259,38 +259,75 @@ Restart=always
 WantedBy=multi-user.target
 ```
 
-### Docker
+### Docker Compose (Recommended)
 
-```dockerfile
-FROM rust:1.75 as builder
-WORKDIR /app
-COPY . .
-RUN cargo build --release
-
-FROM debian:bookworm-slim
-COPY --from=builder /app/target/release/reasondb /usr/local/bin/
-COPY --from=builder /app/target/release/reasondb-server /usr/local/bin/
-
-# Create config directory
-RUN mkdir -p /root/.config/reasondb
-
-# Set production defaults
-ENV REASONDB_HOST=0.0.0.0
-ENV REASONDB_PORT=4444
-ENV REASONDB_PATH=/data/reasondb.redb
-
-EXPOSE 4444
-VOLUME ["/data", "/root/.config/reasondb"]
-
-CMD ["reasondb", "serve"]
-```
+The easiest way to run ReasonDB in Docker:
 
 ```bash
-# Run with API key
+# Create a .env file with your LLM config
+cat > .env <<'EOF'
+REASONDB_LLM_PROVIDER=anthropic
+REASONDB_LLM_API_KEY=sk-ant-...
+EOF
+
+# Start ReasonDB
+docker compose up --build
+
+# Or run in background
+docker compose up --build -d
+```
+
+The Docker Compose setup provides:
+- **Persistent data** via a named volume (`reasondb_data`)
+- **Plugin hot-reload** — changes to `./plugins/` sync into the container automatically
+- **Auto-rebuild** — Rust code changes trigger a container rebuild via `docker compose watch`
+- **Health checks** — automatic restart on failure
+
+```bash
+# Development mode with hot-reload
+docker compose watch
+
+# View logs
+docker compose logs -f
+
+# Stop and clean up
+docker compose down        # keep data
+docker compose down -v     # remove data volume too
+```
+
+### Docker Image Details
+
+ReasonDB uses a multi-stage Alpine-based Docker image:
+
+- **Builder**: `rust:1.88-alpine` — compiles the server binary
+- **Runtime**: `alpine:3.21` — minimal image with plugin runtimes (Python 3, Node.js, Bash)
+- **Built-in plugins**: The `markitdown` plugin ships pre-installed for PDF, Office, images, audio, and URL extraction
+
+### Docker Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REASONDB_LLM_PROVIDER` | — | `anthropic`, `openai`, `gemini`, or `cohere` |
+| `REASONDB_LLM_API_KEY` | — | API key for the LLM provider |
+| `REASONDB_MODEL` | — | Override the default model |
+| `REASONDB_HOST` | `0.0.0.0` | Server bind address |
+| `REASONDB_PORT` | `4444` | Server port |
+| `REASONDB_PATH` | `/data/reasondb.redb` | Database file path |
+| `REASONDB_PLUGINS_DIR` | `/plugins` | Plugin discovery directory |
+| `REASONDB_WORKER_COUNT` | `2` | Number of ingestion workers |
+| `REASONDB_RATE_LIMIT_RPM` | `300` | Requests per minute |
+
+### Running Without Compose
+
+```bash
+docker build -t reasondb .
+
 docker run -d \
   -p 4444:4444 \
   -v reasondb-data:/data \
-  -e ANTHROPIC_API_KEY=sk-ant-xxxxx \
+  -v ./plugins:/plugins \
+  -e REASONDB_LLM_PROVIDER=anthropic \
+  -e REASONDB_LLM_API_KEY=sk-ant-xxxxx \
   reasondb
 ```
 
@@ -330,17 +367,14 @@ Search parameters can be configured per-request:
 | `beam_width` | 3 | Parallel branches to explore |
 | `min_confidence` | 0.3 | Pruning threshold |
 
-Example with custom search config:
+These parameters affect how the LLM navigates the tree when processing `REASON` queries:
 
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "...",
-    "max_depth": 5,
-    "beam_width": 1,
-    "min_confidence": 0.5
-  }'
+```sql
+-- Narrow, fast search (low beam_width, high confidence threshold)
+SELECT * FROM docs REASON 'What is the contract effective date?' LIMIT 1
+
+-- Broad, thorough search (high beam_width, low confidence threshold)
+SELECT * FROM docs REASON 'What are all the ways this contract can be terminated?' LIMIT 10
 ```
 
 ## Health Check

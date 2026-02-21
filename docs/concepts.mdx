@@ -147,30 +147,152 @@ Level 3 - Continue to leaves, extract answers
 | `max_depth` | 10 | Deeper traversal for complex documents |
 | `min_confidence` | 0.3 | Prune branches below this threshold |
 
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -d '{
-    "query": "What are all the ways the contract can end?",
-    "beam_width": 5,
-    "min_confidence": 0.25
-  }'
+```sql
+-- A broad REASON query to explore many branches
+SELECT * FROM contracts
+REASON 'What are all the ways the contract can end?'
+LIMIT 10
 ```
 
 <Tip>
-Increase `beam_width` for exploratory questions where answers might be scattered. Decrease for specific factual queries.
+Increase `beam_width` (server config) for exploratory questions where answers might be scattered. Decrease for specific factual queries.
+</Tip>
+
+## The REASON Query Pipeline
+
+The sections above explain how tree traversal works **within a single document**. But a real query spans an entire table with potentially millions of documents. When you run a `REASON` query, ReasonDB uses a **3-phase agentic pipeline** to progressively narrow down and deeply reason over documents.
+
+<Mermaid>
+{`flowchart LR
+    Q["🔍 REASON Query"] --> P1
+    
+    subgraph P1["Phase 1: Candidate Selection"]
+        direction TB
+        BM25["BM25 Keyword Search"]
+        BM25 --> C100["~100 candidates"]
+    end
+    
+    P1 --> P2
+    
+    subgraph P2["Phase 2: LLM Ranking"]
+        direction TB
+        SUM["Read document summaries"]
+        SUM --> RANK["LLM ranks by relevance"]
+        RANK --> C10["Top ~10 documents"]
+    end
+    
+    P2 --> P3
+    
+    subgraph P3["Phase 3: Deep Reasoning"]
+        direction TB
+        TREE["LLM tree traversal"]
+        TREE --> ANS["Extract answers"]
+    end
+    
+    P3 --> R["📄 Results + Answers"]
+    
+    style P1 fill:#1e1e2e,stroke:#89b4fa,color:#cdd6f4
+    style P2 fill:#1e1e2e,stroke:#a6e3a1,color:#cdd6f4
+    style P3 fill:#1e1e2e,stroke:#f38ba8,color:#cdd6f4`}
+</Mermaid>
+
+Each phase acts as a funnel — BM25 gives breadth, LLM ranking gives precision, and tree traversal gives depth.
+
+### Phase 1: Candidate Selection
+
+The first step is **fast, coarse retrieval** to narrow millions of documents down to ~100 candidates without any LLM calls.
+
+```
+Millions of documents
+    ↓ BM25 keyword search
+~100 candidate documents
+```
+
+ReasonDB picks a strategy in priority order:
+
+1. If your query has a `SEARCH` clause, use its keywords for BM25 search
+2. Otherwise, use the `REASON` query text itself as BM25 keywords
+3. If neither produces results, fall back to metadata/tag filters (capped at 1,000 documents for safety)
+
+This is purely lexical — no LLM calls, sub-millisecond latency.
+
+### Phase 2: Agentic Summary Ranking
+
+The ~100 candidates are too many for expensive deep reasoning. So ReasonDB asks the LLM to **rank documents by their summaries** — the title, root node summary, and tags of each document.
+
+```
+~100 candidates with summaries
+    ↓ LLM ranks by relevance to query
+Top ~10 most relevant documents
+```
+
+The LLM sees lightweight metadata (not full content) and returns a relevance score (0.0–1.0) plus reasoning for each document. Only the top N survive, where N is your `LIMIT` clause (default 10).
+
+<Info>
+If there are fewer candidates than the target limit, this phase is skipped entirely — no unnecessary LLM calls.
+</Info>
+
+### Phase 3: Deep Reasoning (Parallel)
+
+This is the core agentic step. For each surviving document, the SearchEngine performs the **LLM-guided tree traversal** described in the earlier sections — beam search through the document hierarchy, with answer extraction at the leaves.
+
+The key detail: documents are processed in **parallel batches** of up to 5 at a time, so deep reasoning happens concurrently across multiple documents.
+
+```
+Top 10 documents
+    ↓ parallel tree traversal (5 at a time)
+    ↓ LLM navigates each document tree
+    ↓ extracts answers at leaf nodes
+Ranked results with answers + confidence scores
+```
+
+For each document, the LLM:
+1. Reads root children summaries → picks the most promising branches
+2. Traverses deeper, pruning low-confidence paths (beam search)
+3. At leaf nodes, verifies relevance and **extracts a direct answer** to the query
+4. Returns the answer, confidence score, and the navigation path taken
+
+### Result Assembly
+
+After Phase 3 completes:
+1. All matches are **sorted by confidence** (highest first)
+2. Filtered by `min_confidence` if you specified `WITH CONFIDENCE > X`
+3. Paginated via `LIMIT` / `OFFSET`
+
+ReasonDB also applies **early termination** — if enough high-confidence results are found in early batches, remaining batches are skipped.
+
+### Putting It All Together
+
+Here's the full flow for a concrete query:
+
+```sql
+SELECT * FROM vendor_contracts
+WHERE metadata.status = 'active'
+SEARCH 'payment penalties'
+REASON 'What happens if we miss a payment deadline?'
+WITH CONFIDENCE > 0.5
+LIMIT 5
+```
+
+| Phase | What Happens | Documents | LLM Calls |
+|-------|-------------|-----------|-----------|
+| **1. Candidate Selection** | BM25 searches "payment penalties" across active vendor contracts | 95,000 → 100 | 0 |
+| **2. Summary Ranking** | LLM reads 100 document summaries, ranks by relevance to the question | 100 → 5 | 1 |
+| **3. Deep Reasoning** | LLM traverses each document tree, extracts answers from relevant sections | 5 documents, ~20 nodes each | ~15 |
+| **Result** | Sorted by confidence, filtered above 0.5 | 3-5 final answers | **~16 total** |
+
+<Tip>
+REASON query results are **cached** by the combination of reason query text and table ID. Repeated identical queries return instantly without any LLM calls.
 </Tip>
 
 ## Tables: Organizing Knowledge
 
 **Tables** are collections of documents. Think of them as namespaces or folders for your knowledge base.
 
-```bash
-# Create topical collections
-curl -X POST http://localhost:4444/v1/tables \
-  -d '{"name": "Legal Contracts", "metadata": {"department": "legal"}}'
-
-curl -X POST http://localhost:4444/v1/tables \
-  -d '{"name": "Technical Docs", "metadata": {"department": "engineering"}}'
+```sql
+-- Query across different collections
+SELECT * FROM legal_contracts SEARCH 'termination' LIMIT 5
+SELECT * FROM technical_docs REASON 'How do we handle authentication?'
 ```
 
 **Why tables matter:**
@@ -179,37 +301,51 @@ curl -X POST http://localhost:4444/v1/tables \
 - Track document counts and usage
 - Organize by department, project, or topic
 
-## Search vs Query
+## Querying with RQL
 
-ReasonDB offers two complementary interfaces:
+ReasonDB uses **RQL** (ReasonDB Query Language) — a SQL-like syntax with `SEARCH` and `REASON` clauses built in.
 
-### `/v1/search` — LLM-Guided Retrieval
+### SEARCH — Fast Keyword Lookup
 
-For natural language questions requiring reasoning:
+BM25 full-text search for known terms:
 
-```bash
-curl -X POST http://localhost:4444/v1/search \
-  -d '{"query": "What happens to intellectual property if the contract is terminated?"}'
+```sql
+SELECT * FROM legal_contracts
+WHERE tags CONTAINS 'nda'
+SEARCH 'confidentiality obligations'
+LIMIT 10
+```
+
+**Best for:** Keyword matching, filtering by metadata, fast results (~50ms)
+
+### REASON — LLM-Guided Retrieval
+
+The [3-phase agentic pipeline](#the-reason-query-pipeline) kicks in: BM25 narrows candidates, the LLM ranks by summary, then tree traversal extracts precise answers.
+
+```sql
+SELECT * FROM legal_contracts
+WHERE metadata.author = 'Legal Team'
+REASON 'What happens to intellectual property if the contract is terminated?'
 ```
 
 **Best for:** Complex questions, answer extraction, reasoning across sections
 
-### `/v1/query` — RQL Structured Queries
+### Combining Everything
 
-For filtering, aggregation, and hybrid search:
+RQL lets you filter, search, and reason in a single query:
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -d '{
-    "query": "SELECT * FROM \"Legal Contracts\" WHERE metadata.status = '\''active'\'' SEARCH '\''termination'\'' LIMIT 10"
-  }'
+```sql
+SELECT title, metadata.author FROM legal_contracts
+WHERE tags CONTAINS ANY ('nda', 'msa')
+  AND metadata.value_usd > 50000
+SEARCH 'termination clause'
+REASON 'What are the exit conditions?'
+LIMIT 5
 ```
 
-**Best for:** Filtering by metadata, keyword search, combining filters with reasoning
-
-<Info>
-RQL's `REASON` clause lets you combine structured queries with LLM reasoning—filter first, then reason over the results.
-</Info>
+<Tip>
+Use `SEARCH` when you know the keywords. Use `REASON` when you have a question. Combine both for maximum precision.
+</Tip>
 
 ## The Ingestion Pipeline
 
@@ -217,34 +353,120 @@ Understanding how documents become trees helps you optimize for your use case:
 
 <Mermaid>
 {`flowchart TB
-    A[📄 PDF / Markdown / HTML / Text] --> B[Extract Text]
-    B --> C[Chunk by Structure]
-    C --> D[Build Hierarchical Tree]
-    D --> E[Generate LLM Summaries]
-    E --> F[(Knowledge Base)]`}
+    A[📄 PDF / Word / HTML / Text / URLs] --> B[Extractor Plugin]
+    B --> C[Post-Processor Plugin]
+    C --> D[Chunk by Structure]
+    D --> E[Build Hierarchical Tree]
+    E --> F[LLM Summarizes Bottom-Up]
+    F --> G[(Knowledge Base)]`}
 </Mermaid>
 
-1. **Extract**: Parse document format, preserve structural hints
-2. **Chunk**: Split by headings, paragraphs, semantic boundaries
-3. **Build Tree**: Create hierarchy from document outline
-4. **Summarize**: Generate LLM summaries bottom-up (leaves first, then parents)
-5. **Index**: Store with BM25 text search and tree structure
+1. **Extract**: Extractor plugins convert files and URLs to Markdown (built-in: [MarkItDown](https://github.com/microsoft/markitdown))
+2. **Post-process**: Optional plugins clean up or transform the Markdown
+3. **Chunk**: Split by headings, paragraphs, and semantic boundaries
+4. **Build Tree**: Create hierarchy from document outline
+5. **Summarize**: LLM generates summaries bottom-up (leaves first, then parents)
+6. **Index**: Store with BM25 text search and tree structure
 
 <Warning>
 **Summary quality is critical.** Poor summaries lead to poor navigation. ReasonDB uses your configured LLM to generate summaries—better LLM = better summaries = better search.
 </Warning>
 
+## Scaling to Millions of Documents
+
+The tree structure isn't just about understanding—it's the key to scaling. Here's why ReasonDB stays fast even with millions of documents.
+
+### The Math: Why Trees Beat Flat Search
+
+Consider a knowledge base with **1 million documents**, each containing **50 nodes** on average. That's **50 million nodes** total.
+
+| Approach | What it searches | Nodes touched | Latency |
+|----------|-----------------|---------------|---------|
+| **Vector DB (top-k)** | All 50M embeddings | 50,000,000 | Slow, needs ANN index |
+| **BM25 keyword** | All 50M text chunks | 50,000,000 | Fast but imprecise |
+| **ReasonDB (tree)** | Summaries at each level | ~20–50 nodes | Fast AND precise |
+
+**How?** The tree structure acts as a natural index. At each level, the LLM prunes irrelevant branches:
+
+```
+Level 0: 1,000,000 documents → LLM reads table-level summaries
+         → Selects 3 most relevant documents
+
+Level 1: 3 root nodes → reads section summaries
+         → 9 children selected (3 per doc × beam_width=3)
+
+Level 2: 9 nodes → reads subsection summaries
+         → 12 candidates
+
+Level 3: 12 leaf nodes → extract answers
+         → 2–3 final results
+
+Total: ~25 nodes visited out of 50,000,000
+```
+
+Each level is an **exponential filter**. The LLM never reads content it doesn't need to.
+
+### A Concrete Example
+
+Imagine a law firm with 500,000 contracts ingested into ReasonDB:
+
+<Mermaid>
+{`graph TD
+    DB["🗄️ ReasonDB<br/>500K contracts · 25M nodes"]
+
+    DB --> T1["📁 Employment Contracts<br/>120K docs"]
+    DB --> T2["📁 NDAs<br/>80K docs"]
+    DB --> T3["📁 Vendor Agreements<br/>95K docs"]
+    DB --> T4["📁 Leases<br/>60K docs"]
+    DB --> T5["📁 ... 12 more tables"]
+
+    T3 --> D1["📄 Acme Corp<br/>Vendor Agreement"]
+    T3 --> D2["📄 Beta Inc<br/>Vendor Agreement"]
+    T3 --> D3["📄 ... 94,998 more"]
+
+    D1 --> S1["§1 Definitions"]
+    D1 --> S2["§2 Services"]
+    D1 --> S3["§3 Payment"]
+    D1 --> S4["§4 Termination"]
+
+    S3 --> S3a["3.1 Fees"]
+    S3 --> S3b["3.2 Schedule"]
+    S3 --> S3c["3.3 Late Penalties"]
+
+    style DB fill:#1e1e2e,stroke:#89b4fa,color:#cdd6f4
+    style T3 fill:#1e1e2e,stroke:#a6e3a1,color:#cdd6f4
+    style D1 fill:#1e1e2e,stroke:#f9e2af,color:#cdd6f4
+    style S3 fill:#1e1e2e,stroke:#f38ba8,color:#cdd6f4
+    style S3c fill:#1e1e2e,stroke:#f38ba8,color:#cdd6f4`}
+</Mermaid>
+
+**Query:** *"What late payment penalties does the Acme vendor agreement specify?"*
+
+The LLM navigates:
+1. **Tables** → "Vendor Agreements" is relevant (skips 499,905 irrelevant contracts)
+2. **Documents** → "Acme Corp" matches (skips 94,999 others)
+3. **Sections** → "§3 Payment" is relevant (skips Definitions, Services, Termination)
+4. **Subsections** → "3.3 Late Penalties" is the answer (skips Fees, Schedule)
+
+**Result**: 4 LLM calls. 8 nodes visited. Sub-second response. Out of 25 million total nodes.
+
+### Why Not Just Use BM25 or Vectors?
+
+BM25 for the same query would return every contract mentioning "late" or "penalty" — thousands of irrelevant results from employment contracts, NDAs, and leases. Vector search would find "similar" chunks but lose the structural context of *which contract* and *which section*.
+
+ReasonDB combines the precision of structured navigation with the intelligence of LLM reasoning.
+
 ## Key Takeaways
 
 <CardGroup cols={2}>
-  <Card title="Structure Matters" icon="tree">
-    Document hierarchy isn't noise to be discarded—it's signal that enables intelligent navigation.
+  <Card title="3-Phase Funnel" icon="funnel">
+    BM25 for breadth, LLM ranking for precision, tree traversal for depth — each phase narrows the search space exponentially.
   </Card>
   <Card title="Reason to Retrieve" icon="brain">
     The LLM doesn't just consume retrieved content—it actively navigates to find the right content.
   </Card>
   <Card title="Summaries Enable Navigation" icon="compass">
-    LLM-generated summaries at each node level are what make intelligent traversal possible.
+    LLM-generated summaries at each node level are what make intelligent traversal possible — both for document ranking and tree traversal.
   </Card>
   <Card title="Beam Search for Robustness" icon="arrows-split">
     Parallel exploration handles uncertainty and finds answers even in unexpected places.
@@ -257,11 +479,11 @@ Understanding how documents become trees helps you optimize for your use case:
   <Card title="Ingestion Guide" icon="file-arrow-up" href="/guides/ingestion">
     Master document ingestion for different formats
   </Card>
+  <Card title="Plugin System" icon="puzzle-piece" href="/guides/plugins">
+    Extend extraction, chunking, and summarization
+  </Card>
   <Card title="Search Guide" icon="magnifying-glass" href="/guides/search">
     Tune traversal parameters for your use case
-  </Card>
-  <Card title="RQL Language" icon="terminal" href="/guides/rql">
-    Combine structured queries with reasoning
   </Card>
   <Card title="Architecture Deep Dive" icon="building" href="/advanced/architecture">
     Technical details of ReasonDB internals

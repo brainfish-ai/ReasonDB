@@ -234,10 +234,8 @@ Now let's explore the relationships:
 
 ### Find All Documents Related to the Master Agreement
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -H "Content-Type: application/json" \
-  -d "{\"query\": \"SELECT * FROM contracts RELATED TO '$MSA_ID'\"}" | jq
+```sql
+SELECT * FROM contracts RELATED TO 'MSA_ID'
 ```
 
 **Result**: Returns Amendment #1, Amendment #2, and the Side Letter.
@@ -281,12 +279,10 @@ curl -s "http://localhost:4444/v1/documents/$MSA_ID/relations" | jq
 
 ### Ask Questions About the Contract Package
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"query\": \"SELECT * FROM contracts RELATED TO '$MSA_ID' REASON 'What are the current payment terms?'\"
-  }" | jq
+```sql
+SELECT * FROM contracts
+RELATED TO 'MSA_ID'
+REASON 'What are the current payment terms?'
 ```
 
 The LLM will find Amendment #1 and extract the updated payment terms.
@@ -330,11 +326,8 @@ curl -X POST http://localhost:4444/v1/relations \
 
 ### Find the Current Version
 
-```bash
-# Find what supersedes the original MSA
-curl -X POST http://localhost:4444/v1/query \
-  -H "Content-Type: application/json" \
-  -d "{\"query\": \"SELECT * FROM contracts SUPERSEDED_BY '$MSA_ID'\"}" | jq
+```sql
+SELECT * FROM contracts SUPERSEDED_BY 'MSA_ID'
 ```
 
 ### Check if a Document is Superseded
@@ -373,10 +366,8 @@ curl -X POST http://localhost:4444/v1/relations \
 
 ### Find All Documents Referencing a Policy
 
-```bash
-curl -X POST http://localhost:4444/v1/query \
-  -H "Content-Type: application/json" \
-  -d "{\"query\": \"SELECT * FROM policies REFERENCED_BY '$POLICY_ID'\"}" | jq
+```sql
+SELECT * FROM policies REFERENCED_BY 'POLICY_ID'
 ```
 
 ## Complete Relationship Graph
@@ -431,10 +422,8 @@ SELECT * FROM contracts REFERENCED_BY 'policy_id'
 
 ### 4. Due Diligence: "Get the complete contract package with all amendments"
 
-```bash
-# Get master + all related documents
-curl -X POST http://localhost:4444/v1/query \
-  -d "{\"query\": \"SELECT * FROM contracts RELATED TO '$MSA_ID'\"}"
+```sql
+SELECT * FROM contracts RELATED TO 'MSA_ID'
 ```
 
 ### 5. Question Answering: "What are Acme's current payment terms?"

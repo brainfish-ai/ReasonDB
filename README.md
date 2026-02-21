@@ -144,62 +144,85 @@ EOF
 docker compose up --build
 ```
 
-### Your First Search
+### Query with RQL
 
-```bash
-# Create a knowledge base
-curl -X POST http://localhost:4444/v1/tables \
-  -H "Content-Type: application/json" \
-  -d '{"name": "contracts"}'
+ReasonDB uses **RQL** — a SQL-like query language with built-in `SEARCH` and `REASON` clauses:
 
-# Ingest a document
-curl -X POST http://localhost:4444/v1/ingest/text \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Service Agreement",
-    "content": "# Service Agreement\n\n## Section 1: Terms\n\n..."
-  }'
+```sql
+-- Fast keyword search (BM25, ~50ms)
+SELECT * FROM contracts SEARCH 'payment terms' LIMIT 5
 
-# Ask questions in natural language
-curl -X POST http://localhost:4444/v1/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What are the payment terms and late fees?"}'
+-- LLM-guided reasoning (navigates the document tree)
+SELECT * FROM contracts REASON 'What are the late fees and penalties?'
+
+-- Combine filters, search, and reasoning in one query
+SELECT * FROM contracts
+WHERE tags CONTAINS 'nda' AND metadata.value_usd > 10000
+SEARCH 'termination clause'
+REASON 'What are the exit conditions?'
+LIMIT 5
 ```
 
 ## How It Works
 
 ```mermaid
 flowchart TD
-    subgraph Ingestion["Ingestion Pipeline"]
-        A["Documents"] -->|Parse & Chunk| B["Build Hierarchical Tree"]
-        B -->|Bottom-up| C["LLM Summarizes Each Node"]
+    subgraph Ingestion["Ingestion Pipeline (Plugin-Driven)"]
+        A["Documents / URLs"] -->|Extractor Plugin| B["Markdown"]
+        B -->|Post-Processor Plugin| C["Cleaned Markdown"]
+        C -->|Chunker| D["Semantic Chunks"]
+        D --> E["Build Hierarchical Tree"]
+        E -->|Bottom-up| F["LLM Summarizes Each Node"]
     end
 
     subgraph Search["Search & Reasoning"]
-        D["Natural Language Query"] --> E["LLM Reads Root Summary"]
-        E -->|Selects relevant branches| F["Traverse Tree"]
-        F -->|Parallel beam search| G["Drill Into Leaf Nodes"]
+        G["Natural Language Query"] --> H["LLM Reads Root Summary"]
+        H -->|Selects relevant branches| I["Traverse Tree"]
+        I -->|Parallel beam search| J["Drill Into Leaf Nodes"]
     end
 
     subgraph Result["Response"]
-        G --> H["Extract Answer"]
-        H --> I["Confidence Score + Reasoning Path"]
+        J --> K["Extract Answer"]
+        K --> L["Confidence Score + Reasoning Path"]
     end
 
     Ingestion --> Search
 ```
 
-1. **Ingest** — Documents are parsed and converted into hierarchical trees
-2. **Summarize** — LLM generates summaries for each node (bottom-up)
-3. **Search** — LLM traverses the tree, choosing branches based on summaries via parallel beam search
-4. **Return** — Relevant content with extracted answers, confidence scores, and the full reasoning path
+1. **Extract** — Extractor plugins convert documents and URLs to Markdown (built-in: [MarkItDown](https://github.com/microsoft/markitdown))
+2. **Chunk** — Content is split into semantic chunks with heading detection
+3. **Build Tree** — Chunks are organized into a hierarchical tree structure
+4. **Summarize** — LLM generates summaries for each node (bottom-up)
+5. **Search** — LLM traverses the tree, choosing branches based on summaries via parallel beam search
+6. **Return** — Relevant content with extracted answers, confidence scores, and the full reasoning path
+
+## Plugin Architecture
+
+ReasonDB uses a **plugin system** for all document extraction. Plugins are external processes (Python, Node.js, Bash, or compiled binaries) that communicate via JSON over stdin/stdout.
+
+| What ships out of the box | What you can add |
+|---------------------------|------------------|
+| **markitdown** — PDF, Word, Excel, PowerPoint, HTML, images (OCR), audio, YouTube, and more | Custom extractors, post-processors, chunkers, summarizers |
+
+```bash
+# List installed plugins
+curl http://localhost:4444/v1/plugins
+
+# Test a plugin
+curl -X POST http://localhost:4444/v1/plugins/markitdown/test \
+  -H "Content-Type: application/json" \
+  -d '{"operation":"extract","params":{"source_type":"file","path":"/tmp/doc.pdf"}}'
+```
+
+Community plugins can be installed by dropping a directory into `$REASONDB_PLUGINS_DIR` (default: `./plugins`). See the [Plugin Guide](https://docs.reasondb.dev/guides/plugins) for details.
 
 ## Built for Production
 
 | Feature | Description |
 |---------|-------------|
+| **Plugin Extraction** | Extensible document ingestion — PDF, Office, images, audio, URLs out of the box |
 | **RQL Query Language** | SQL-like syntax with `SEARCH` (BM25) and `REASON` (LLM) clauses |
-| **Multi-Provider LLM** | Anthropic, OpenAI, Gemini, Cohere—switch without code changes |
+| **Multi-Provider LLM** | Anthropic, OpenAI, Gemini, Cohere — switch without code changes |
 | **API Key Auth** | Production-ready security with fine-grained permissions |
 | **Rate Limiting** | Built-in protection with configurable limits |
 | **High Performance** | Rust-powered, ACID-compliant, async parallel traversal |
@@ -213,20 +236,23 @@ flowchart TD
 
 ## Tech Stack
 
-- **Storage**: `redb` - Pure Rust, ACID-compliant embedded database
-- **Search**: `tantivy` - Blazing fast BM25 full-text search
-- **Async Runtime**: `tokio` - Parallel branch exploration
-- **HTTP Server**: `axum` - Fast, ergonomic web framework
-- **LLM Integration**: `rig-core` - Multi-provider LLM abstraction
-- **API Docs**: `utoipa` - OpenAPI 3.0 + Swagger UI
+- **Storage**: `redb` — Pure Rust, ACID-compliant embedded database
+- **Search**: `tantivy` — Blazing fast BM25 full-text search
+- **Extraction**: Plugin system — Process-based plugins (Python, Node.js, Bash, binaries)
+- **Async Runtime**: `tokio` — Parallel branch exploration
+- **HTTP Server**: `axum` — Fast, ergonomic web framework
+- **LLM Integration**: `rig-core` — Multi-provider LLM abstraction
+- **API Docs**: `utoipa` — OpenAPI 3.0 + Swagger UI
+- **Docker**: Alpine-based image with Python 3, Node.js, and Bash runtimes
 
 ## Documentation
 
-- **[Full Documentation](https://docs.reasondb.dev)** - Complete guides and tutorials
-- **[Quick Start](https://docs.reasondb.dev/quickstart)** - Get running in 5 minutes
-- **[Core Concepts](https://docs.reasondb.dev/concepts)** - Understand trees, nodes, and HRR
-- **[API Reference](https://docs.reasondb.dev/api-reference/introduction)** - Complete REST API documentation
-- **[Swagger UI](http://localhost:4444/swagger-ui/)** - Interactive API docs (when server is running)
+- **[Full Documentation](https://docs.reasondb.dev)** — Complete guides and tutorials
+- **[Quick Start](https://docs.reasondb.dev/quickstart)** — Get running in 5 minutes
+- **[Core Concepts](https://docs.reasondb.dev/concepts)** — Understand trees, nodes, and HRR
+- **[Plugin Guide](https://docs.reasondb.dev/guides/plugins)** — Build custom extraction and processing plugins
+- **[API Reference](https://docs.reasondb.dev/api-reference/introduction)** — Complete REST API documentation
+- **[Swagger UI](http://localhost:4444/swagger-ui/)** — Interactive API docs (when server is running)
 
 ## License
 

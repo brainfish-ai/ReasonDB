@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/reasondb-core",
     "crates/reasondb-ingest",
+    "crates/reasondb-plugin",
     "crates/reasondb-server",
     "crates/reasondb-cli",
     "apps/reasondb-client/src-tauri",

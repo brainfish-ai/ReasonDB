@@ -3,11 +3,9 @@
 //! Splits documents into semantic chunks and detects hierarchical structure.
 
 use regex::Regex;
-use tracing::debug;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::error::Result;
-use crate::pdf::ExtractedPage;
 
 /// A detected section heading
 #[derive(Debug, Clone)]
@@ -129,31 +127,6 @@ impl SemanticChunker {
                 level: 2,
             },
         ]
-    }
-
-    /// Chunk pages into semantic chunks
-    pub fn chunk_pages(&self, pages: &[ExtractedPage]) -> Result<Vec<TextChunk>> {
-        // Combine all pages into one document with page markers
-        let mut full_text = String::new();
-        let mut page_offsets: Vec<(usize, usize)> = Vec::new(); // (offset, page_number)
-
-        for page in pages {
-            page_offsets.push((full_text.len(), page.page_number));
-            full_text.push_str(&page.text);
-            full_text.push('\n');
-        }
-
-        // Detect headings first
-        let headings = if self.config.detect_headings {
-            self.detect_headings(&full_text, &page_offsets)
-        } else {
-            Vec::new()
-        };
-
-        debug!("Detected {} headings", headings.len());
-
-        // Create chunks based on headings and size
-        self.create_chunks(&full_text, &headings, &page_offsets)
     }
 
     /// Chunk a single text string
@@ -398,13 +371,11 @@ impl SemanticChunker {
 pub struct TocExtractor;
 
 impl TocExtractor {
-    /// Try to extract a table of contents from pages
-    pub fn extract(pages: &[ExtractedPage]) -> Option<Vec<DetectedHeading>> {
-        // Look for a page that looks like a ToC
-        for page in pages.iter().take(10) {
-            // ToC usually in first 10 pages
-            if Self::looks_like_toc(&page.text) {
-                return Self::parse_toc(&page.text);
+    /// Try to extract a table of contents from the given text sections.
+    pub fn extract(sections: &[&str]) -> Option<Vec<DetectedHeading>> {
+        for section in sections.iter().take(10) {
+            if Self::looks_like_toc(section) {
+                return Self::parse_toc(section);
             }
         }
         None

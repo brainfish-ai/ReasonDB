@@ -21,10 +21,14 @@ SELECT [fields] FROM <table>
 
 ## Query Endpoint
 
+Send RQL queries via the `/v1/query` endpoint or the CLI:
+
 ```bash
-curl -X POST http://localhost:4444/v1/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "SELECT * FROM legal WHERE metadata.author = '\''Alice'\'' LIMIT 10"}'
+# Via CLI (interactive REPL)
+reasondb query
+
+# Via CLI (direct execution)
+reasondb query -q "SELECT * FROM legal WHERE metadata.author = 'Alice' LIMIT 10"
 ```
 
 ## SELECT Clauses

@@ -8,6 +8,7 @@ description = "Document ingestion pipeline for ReasonDB"
 
 [dependencies]
 reasondb-core = { path = "../reasondb-core" }
+reasondb-plugin = { path = "../reasondb-plugin" }
 
 # Async
 tokio.workspace = true
@@ -27,13 +28,6 @@ tracing.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 
-# PDF parsing
-pdf-extract = "0.7"
-lopdf = "0.34"
-
 # Text processing
 regex = "1.10"
 unicode-segmentation = "1.10"
-
-# File handling
-tempfile = "3.9"

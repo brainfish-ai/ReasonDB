@@ -5,6 +5,8 @@ description: Learn how to ingest documents from text, files, and URLs into Reaso
 
 ReasonDB supports multiple ingestion methods to import your documents. Each method creates a hierarchical tree structure with LLM-generated summaries for intelligent navigation.
 
+All file and URL extraction is handled by the [plugin system](/guides/plugins). The built-in `markitdown` plugin covers PDF, Office, images, audio, and web pages out of the box.
+
 ## Ingestion Overview
 
 <Mermaid>
@@ -16,8 +18,9 @@ ReasonDB supports multiple ingestion methods to import your documents. Each meth
     end
 
     subgraph Pipeline
-        Extract[Extract Text]
-        Chunk[Chunk by Structure]
+        Extract[Extractor Plugin]
+        Post[Post-Processor Plugin]
+        Chunk[Chunker]
         Tree[Build Tree]
         Summary[LLM Summarize]
     end
@@ -30,7 +33,7 @@ ReasonDB supports multiple ingestion methods to import your documents. Each meth
     Text --> Extract
     File --> Extract
     URL --> Extract
-    Extract --> Chunk --> Tree --> Summary --> DB
+    Extract --> Post --> Chunk --> Tree --> Summary --> DB
     Summary --> Index`}
 </Mermaid>
 
@@ -123,7 +126,7 @@ curl -X POST http://localhost:4444/v1/ingest/file \
 | Markdown | `.md` | Native support |
 
 <Note>
-File ingestion uses MarkItDown under the hood for format conversion.
+File ingestion uses the [plugin system](/guides/plugins). The built-in `markitdown` plugin handles format conversion. You can add custom extractor plugins for additional formats.
 </Note>
 
 ### Example: Ingest a PDF
@@ -207,16 +210,21 @@ curl -X POST http://localhost:4444/v1/ingest/text \
   }'
 ```
 
-You can then filter by these in search and queries:
+You can then filter by these in RQL queries:
 
-```bash
-# Search within tagged documents
-curl -X POST http://localhost:4444/v1/search \
-  -d '{"query": "confidentiality clause", "tags": ["nda"]}'
+```sql
+-- Search within tagged documents
+SELECT * FROM legal
+WHERE tags CONTAINS 'nda'
+SEARCH 'confidentiality clause'
 
-# Query by metadata
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM legal WHERE metadata.contract_type = '\''nda'\''"}'
+-- Filter by metadata
+SELECT * FROM legal WHERE metadata.contract_type = 'nda'
+
+-- Combine metadata filters with reasoning
+SELECT * FROM legal
+WHERE metadata.contract_type = 'nda'
+REASON 'What are the confidentiality obligations?'
 ```
 
 ## Disable LLM Summaries
@@ -288,5 +296,11 @@ Returns the full hierarchical tree with summaries:
   </Card>
   <Card title="Tables Guide" icon="table" href="/guides/tables">
     Organize documents with tables
+  </Card>
+  <Card title="Plugin Guide" icon="puzzle-piece" href="/guides/plugins">
+    Build custom extractors and processors
+  </Card>
+  <Card title="Configuration" icon="gear" href="/guides/configuration">
+    Docker, environment variables, and production setup
   </Card>
 </CardGroup>

@@ -151,10 +151,9 @@ async function fetchWithRateLimit(url) {
 
 Combine multiple operations when possible:
 
-```bash
-# Instead of multiple single queries
-curl -X POST http://localhost:4444/v1/query \
-  -d '{"query": "SELECT * FROM docs WHERE id IN (\"doc1\", \"doc2\", \"doc3\")"}'
+```sql
+-- Batch by combining conditions instead of separate requests
+SELECT * FROM docs WHERE id IN ('doc1', 'doc2', 'doc3')
 ```
 
 ### 4. Use Caching
