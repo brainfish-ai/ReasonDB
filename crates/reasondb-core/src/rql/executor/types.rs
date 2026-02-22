@@ -90,6 +90,7 @@ pub struct MutationResult {
 #[serde(rename_all = "snake_case")]
 pub enum ReasonPhase {
     Candidates,
+    Filtering,
     Ranking,
     Reasoning,
 }

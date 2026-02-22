@@ -160,7 +160,7 @@ Increase `beam_width` (server config) for exploratory questions where answers mi
 
 ## The REASON Query Pipeline
 
-The sections above explain how tree traversal works **within a single document**. But a real query spans an entire table with potentially millions of documents. When you run a `REASON` query, ReasonDB uses a **3-phase agentic pipeline** to progressively narrow down and deeply reason over documents.
+The sections above explain how tree traversal works **within a single document**. But a real query spans an entire table with potentially millions of documents. When you run a `REASON` query, ReasonDB uses a **4-phase agentic pipeline** to progressively narrow down and deeply reason over documents.
 
 <Mermaid>
 {`flowchart LR
@@ -168,35 +168,46 @@ The sections above explain how tree traversal works **within a single document**
     
     subgraph P1["Phase 1: Candidate Selection"]
         direction TB
-        BM25["BM25 Keyword Search"]
+        QE["Query Term Extraction"]
+        QE --> BM25["BM25 Search + Title Boost"]
         BM25 --> C100["~100 candidates"]
     end
     
     P1 --> P2
     
-    subgraph P2["Phase 2: LLM Ranking"]
+    subgraph P2["Phase 2: Structural Filtering"]
         direction TB
-        SUM["Read document summaries"]
-        SUM --> RANK["LLM ranks by relevance"]
-        RANK --> C10["Top ~10 documents"]
+        TG["Recursive Tree-Grep"]
+        TG --> RE["Reorder by structure"]
+        RE --> CE["Enriched candidates"]
     end
     
     P2 --> P3
     
-    subgraph P3["Phase 3: Deep Reasoning"]
+    subgraph P3["Phase 3: LLM Ranking"]
+        direction TB
+        SUM["Read summaries + match signals"]
+        SUM --> RANK["LLM ranks by relevance"]
+        RANK --> C10["Top ~10 documents"]
+    end
+    
+    P3 --> P4
+    
+    subgraph P4["Phase 4: Deep Reasoning"]
         direction TB
         TREE["LLM tree traversal"]
         TREE --> ANS["Extract answers"]
     end
     
-    P3 --> R["📄 Results + Answers"]
+    P4 --> R["📄 Results + Answers"]
     
     style P1 fill:#1e1e2e,stroke:#89b4fa,color:#cdd6f4
-    style P2 fill:#1e1e2e,stroke:#a6e3a1,color:#cdd6f4
-    style P3 fill:#1e1e2e,stroke:#f38ba8,color:#cdd6f4`}
+    style P2 fill:#1e1e2e,stroke:#cba6f7,color:#cdd6f4
+    style P3 fill:#1e1e2e,stroke:#a6e3a1,color:#cdd6f4
+    style P4 fill:#1e1e2e,stroke:#f38ba8,color:#cdd6f4`}
 </Mermaid>
 
-Each phase acts as a funnel — BM25 gives breadth, LLM ranking gives precision, and tree traversal gives depth.
+Each phase acts as a funnel — BM25 gives breadth, structural filtering gives precision, LLM ranking gives intelligence, and tree traversal gives depth.
 
 ### Phase 1: Candidate Selection
 
@@ -204,35 +215,62 @@ The first step is **fast, coarse retrieval** to narrow millions of documents dow
 
 ```
 Millions of documents
-    ↓ BM25 keyword search
-~100 candidate documents
+    ↓ Stop word removal + stemming
+    ↓ BM25 keyword search (title boosted 3x)
+~100 candidate documents (with node-level hit scores)
 ```
 
 ReasonDB picks a strategy in priority order:
 
 1. If your query has a `SEARCH` clause, use its keywords for BM25 search
-2. Otherwise, use the `REASON` query text itself as BM25 keywords
+2. Otherwise, extract meaningful terms from the `REASON` query (stop words removed, stemmed) for BM25
 3. If neither produces results, fall back to metadata/tag filters (capped at 1,000 documents for safety)
+
+Unlike previous versions, BM25 now preserves **which nodes matched and their scores** (not just the document ID), and title matches are weighted 3x higher than content matches.
 
 This is purely lexical — no LLM calls, sub-millisecond latency.
 
-### Phase 2: Agentic Summary Ranking
+### Phase 2: Structural Filtering
 
-The ~100 candidates are too many for expensive deep reasoning. So ReasonDB asks the LLM to **rank documents by their summaries** — the title, root node summary, and tags of each document.
+Before spending tokens on LLM ranking, ReasonDB performs a **recursive tree-grep** through each candidate's node hierarchy — the same pattern used by tools like Claude Code for codebase navigation.
 
 ```
-~100 candidates with summaries
+~100 candidates
+    ↓ Walk each document tree (root → chapters → sections → leaves)
+    ↓ Match query terms against titles, summaries, and content
+    ↓ Score by structural depth + field type (title > summary > content)
+Filtered & reordered candidates (zero-score documents dropped)
+```
+
+For each candidate document, the tree-grep:
+- Checks if query terms appear in **node titles** (high signal — like a filename match)
+- Checks **node summaries** (medium signal)
+- Checks **leaf content** (ground truth signal)
+- Weights shallower matches higher (a chapter titled "Termination" scores more than a leaf mentioning it)
+
+The combined score (40% BM25 + 60% structural) reorders candidates so the most structurally relevant documents are at the top. Candidates with zero combined score are dropped entirely. Each surviving candidate is enriched with `matched_sections` (which node titles matched) and `best_snippet` (from the highest-scoring BM25 node hit).
+
+This is zero LLM calls, pure regex/string matching — microsecond latency.
+
+### Phase 3: Agentic Summary Ranking
+
+The remaining candidates are too many for expensive deep reasoning. So ReasonDB asks the LLM to **rank documents by their summaries** — enriched with structural match signals from Phase 2.
+
+```
+Filtered candidates with summaries + match signals
     ↓ LLM ranks by relevance to query
 Top ~10 most relevant documents
 ```
 
-The LLM sees lightweight metadata (not full content) and returns a relevance score (0.0–1.0) plus reasoning for each document. Only the top N survive, where N is your `LIMIT` clause (default 10).
+The LLM now sees not just title/summary/tags, but also **which sections matched the query** and a **best snippet** from BM25. This gives it concrete evidence to rank with, rather than guessing from vague summaries alone.
+
+Only the top N survive, where N is your `LIMIT` clause (default 10).
 
 <Info>
-If there are fewer candidates than the target limit, this phase is skipped entirely — no unnecessary LLM calls.
+If there are fewer candidates than the target limit, the LLM ranking phase is skipped entirely — no unnecessary LLM calls.
 </Info>
 
-### Phase 3: Deep Reasoning (Parallel)
+### Phase 4: Deep Reasoning (Parallel)
 
 This is the core agentic step. For each surviving document, the SearchEngine performs the **LLM-guided tree traversal** described in the earlier sections — beam search through the document hierarchy, with answer extraction at the leaves.
 
@@ -254,7 +292,7 @@ For each document, the LLM:
 
 ### Result Assembly
 
-After Phase 3 completes:
+After Phase 4 completes:
 1. All matches are **sorted by confidence** (highest first)
 2. Filtered by `min_confidence` if you specified `WITH CONFIDENCE > X`
 3. Paginated via `LIMIT` / `OFFSET`
@@ -276,9 +314,10 @@ LIMIT 5
 
 | Phase | What Happens | Documents | LLM Calls |
 |-------|-------------|-----------|-----------|
-| **1. Candidate Selection** | BM25 searches "payment penalties" across active vendor contracts | 95,000 → 100 | 0 |
-| **2. Summary Ranking** | LLM reads 100 document summaries, ranks by relevance to the question | 100 → 5 | 1 |
-| **3. Deep Reasoning** | LLM traverses each document tree, extracts answers from relevant sections | 5 documents, ~20 nodes each | ~15 |
+| **1. Candidate Selection** | BM25 searches "payment penalties" (stop words stripped, title boosted 3x) across active vendor contracts | 95,000 → 100 | 0 |
+| **2. Structural Filtering** | Recursive tree-grep walks each candidate's node tree, matching terms against titles/summaries/content. Drops zero-score documents, reorders by structural relevance, enriches with match signals. | 100 → ~60 | 0 |
+| **3. Summary Ranking** | LLM reads document summaries + matching sections + best snippets, ranks by relevance | ~60 → 5 | 1 |
+| **4. Deep Reasoning** | LLM traverses each document tree, extracts answers from relevant sections | 5 documents, ~20 nodes each | ~15 |
 | **Result** | Sorted by confidence, filtered above 0.5 | 3-5 final answers | **~16 total** |
 
 <Tip>
@@ -320,7 +359,7 @@ LIMIT 10
 
 ### REASON — LLM-Guided Retrieval
 
-The [3-phase agentic pipeline](#the-reason-query-pipeline) kicks in: BM25 narrows candidates, the LLM ranks by summary, then tree traversal extracts precise answers.
+The [4-phase agentic pipeline](#the-reason-query-pipeline) kicks in: BM25 narrows candidates, tree-grep filters by structure, the LLM ranks by summary, then tree traversal extracts precise answers.
 
 ```sql
 SELECT * FROM legal_contracts
@@ -459,8 +498,8 @@ ReasonDB combines the precision of structured navigation with the intelligence o
 ## Key Takeaways
 
 <CardGroup cols={2}>
-  <Card title="3-Phase Funnel" icon="funnel">
-    BM25 for breadth, LLM ranking for precision, tree traversal for depth — each phase narrows the search space exponentially.
+  <Card title="4-Phase Funnel" icon="funnel">
+    BM25 for breadth, tree-grep for structure, LLM ranking for precision, tree traversal for depth — each phase narrows the search space.
   </Card>
   <Card title="Reason to Retrieve" icon="brain">
     The LLM doesn't just consume retrieved content—it actively navigates to find the right content.

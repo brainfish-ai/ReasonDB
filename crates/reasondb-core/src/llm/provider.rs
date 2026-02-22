@@ -23,6 +23,45 @@ use super::{
 };
 use crate::error::{ReasonError, Result};
 
+/// Extract valid JSON from an LLM response that may contain markdown fences or prose.
+/// Tries (in order): raw parse, fence-stripped parse, brace/bracket extraction.
+fn extract_json_from_response(response: &str) -> &str {
+    let trimmed = response.trim();
+
+    // Fast path: response is already valid-looking JSON
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        return trimmed;
+    }
+
+    // Strip markdown code fences: ```json ... ``` (possibly with trailing prose)
+    if let Some(after_fence) = trimmed
+        .strip_prefix("```json")
+        .or_else(|| trimmed.strip_prefix("```"))
+    {
+        if let Some(end) = after_fence.find("```") {
+            return after_fence[..end].trim();
+        }
+    }
+
+    // Last resort: find the first { or [ and its matching close
+    if let Some(start) = trimmed.find('{') {
+        if let Some(end) = trimmed.rfind('}') {
+            if end > start {
+                return &trimmed[start..=end];
+            }
+        }
+    }
+    if let Some(start) = trimmed.find('[') {
+        if let Some(end) = trimmed.rfind(']') {
+            if end > start {
+                return &trimmed[start..=end];
+            }
+        }
+    }
+
+    trimmed
+}
+
 /// Supported LLM providers
 #[derive(Debug, Clone)]
 pub enum LLMProvider {
@@ -333,15 +372,7 @@ impl Reasoner {
                     &response[..response.len().min(500)]
                 );
 
-                let json_str = response
-                    .trim()
-                    .strip_prefix("```json")
-                    .or_else(|| response.trim().strip_prefix("```"))
-                    .unwrap_or(&response)
-                    .trim()
-                    .strip_suffix("```")
-                    .unwrap_or(&response)
-                    .trim();
+                let json_str = extract_json_from_response(&response);
 
                 serde_json::from_str(json_str).map_err(|e| {
                     warn!(
@@ -688,15 +719,25 @@ Return summaries for ALL {count} sections."#,
             return Ok(Vec::new());
         }
 
-        // Format documents for the prompt
+        // Format documents for the prompt, including tree-grep match signals
         let docs_formatted: String = documents
             .iter()
             .enumerate()
             .map(|(i, doc)| {
-                format!(
+                let mut entry = format!(
                     "{}. [ID: {}] \"{}\" - {}\n   Tags: {:?}",
                     i + 1, doc.id, doc.title, doc.summary, doc.tags
-                )
+                );
+                if !doc.matched_sections.is_empty() {
+                    entry.push_str(&format!(
+                        "\n   Matching sections: {}",
+                        doc.matched_sections.join(", ")
+                    ));
+                }
+                if let Some(ref snippet) = doc.best_snippet {
+                    entry.push_str(&format!("\n   Best match: {}", snippet));
+                }
+                entry
             })
             .collect::<Vec<_>>()
             .join("\n");

@@ -176,7 +176,9 @@ flowchart TD
     end
 
     subgraph Search["Search & Reasoning"]
-        G["Natural Language Query"] --> H["LLM Reads Root Summary"]
+        G["Natural Language Query"] --> G1["BM25 Candidates + Title Boost"]
+        G1 --> G2["Recursive Tree-Grep Pre-Filter"]
+        G2 --> H["LLM Ranks by Summaries + Match Signals"]
         H -->|Selects relevant branches| I["Traverse Tree"]
         I -->|Parallel beam search| J["Drill Into Leaf Nodes"]
     end
@@ -193,7 +195,7 @@ flowchart TD
 2. **Chunk** — Content is split into semantic chunks with heading detection
 3. **Build Tree** — Chunks are organized into a hierarchical tree structure
 4. **Summarize** — LLM generates summaries for each node (bottom-up)
-5. **Search** — LLM traverses the tree, choosing branches based on summaries via parallel beam search
+5. **Search** — 4-phase pipeline: (1) BM25 candidate selection (title boosted 3x) → (2) recursive tree-grep structural filtering → (3) LLM summary ranking (enriched with match signals) → (4) parallel beam-search tree traversal
 6. **Return** — Relevant content with extracted answers, confidence scores, and the full reasoning path
 
 ## Plugin Architecture

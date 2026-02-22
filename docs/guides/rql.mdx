@@ -193,14 +193,15 @@ REASON 'What are the confidentiality obligations?'
 
 | Feature | SEARCH | REASON |
 |---------|--------|--------|
-| Method | BM25 keyword matching | LLM tree traversal |
+| Method | BM25 keyword matching (title boosted 3x) | BM25 + tree-grep pre-filter + LLM tree traversal |
 | Speed | Fast (~50ms) | Slower (~2-5s) |
 | Best for | Known keywords | Questions, concepts |
 | Results | Keyword highlights | Extracted answers |
-| Ranking | BM25 score | Confidence score |
+| Ranking | BM25 score | Structural + LLM confidence score |
+| Pre-filtering | None | Stop word removal, stemming, recursive tree-grep |
 
 <Tip>
-Use SEARCH for keyword lookup and filtering. Use REASON when you need the LLM to understand and answer a question.
+Use SEARCH for keyword lookup and filtering. Use REASON when you need the LLM to understand and answer a question. REASON queries use a 4-phase pipeline: (1) BM25 candidate selection, (2) structural tree-grep filtering, (3) LLM summary ranking, and (4) deep tree traversal.
 </Tip>
 
 ## RELATED TO Clause

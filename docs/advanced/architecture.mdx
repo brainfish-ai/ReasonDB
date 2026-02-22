@@ -419,14 +419,27 @@ struct AppState<R: ReasoningEngine> {
     participant LLM
     participant Store
 
-    Client->>Server: POST /v1/search
-    Server->>Engine: Execute search
-    Engine->>Store: Get root node summaries
+    Client->>Server: POST /v1/search (REASON query)
+    
+    Note over Server: Phase 1: BM25 Candidate Selection
+    Server->>Store: BM25 search (title boosted 3x)
+    Store-->>Server: ~100 candidates with node-level scores
+    
+    Note over Server: Phase 2: Structural Filtering
+    Server->>Store: Recursive tree-grep per candidate
+    Store-->>Server: Structural scores + matched sections
+    Server->>Server: Drop zero-score docs, reorder by combined score
+    
+    Note over Server: Phase 3: LLM Summary Ranking
+    Server->>LLM: Rank summaries + match signals
+    LLM-->>Server: Top ~10 documents
+    
+    Note over Engine: Phase 4: Deep Reasoning
+    Server->>Engine: Execute parallel tree traversal
     loop Beam search until max_depth
         Engine->>LLM: Evaluate relevance
         LLM-->>Engine: Confidence scores
         Engine->>Engine: Prune low confidence
-        Engine->>Engine: Select top beam_width
         Engine->>Store: Get child summaries
     end
     Engine->>LLM: Extract answers

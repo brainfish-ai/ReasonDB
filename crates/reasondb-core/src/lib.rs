@@ -51,11 +51,13 @@ pub mod engine;
 pub mod error;
 pub mod llm;
 pub mod model;
+pub mod query_filter;
 pub mod ratelimit;
 pub mod rql;
 pub mod shard;
 pub mod store;
 pub mod text_index;
+pub mod tree_grep;
 
 // Re-export main types
 pub use auth::{ApiKey, ApiKeyId, ApiKeyMetadata, ApiKeyStore, KeyPrefix, Permission, Permissions};

@@ -83,6 +83,12 @@ pub struct DocumentSummary {
     pub summary: String,
     /// Tags for context
     pub tags: Vec<String>,
+    /// Titles of nodes that matched query terms (from tree-grep pre-filter)
+    #[serde(default)]
+    pub matched_sections: Vec<String>,
+    /// Snippet from the highest-scoring matched node
+    #[serde(default)]
+    pub best_snippet: Option<String>,
 }
 
 /// Result of ranking a document's relevance to a query
