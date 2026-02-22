@@ -32,11 +32,11 @@ SELECT * FROM contracts REASON 'What are the late payment penalties?'
 }
 ```
 
-**What happened:**
-1. LLM read top-level summaries → identified "Payment Terms" as relevant
-2. Drilled into subsections → found "Late Penalties"
-3. Extracted and synthesized the answer
-4. Returned the path taken and confidence score
+**What happened (4-phase pipeline):**
+1. **Phase 1 — BM25**: Found candidate documents matching "late payment penalties" (title matches boosted 3x)
+2. **Phase 2 — Tree-Grep**: Walked each candidate's hierarchy, scoring structural matches against query terms, dropping zero-score documents
+3. **Phase 3 — LLM Ranking**: Ranked the top candidates using summaries enriched with matching section titles and snippets
+4. **Phase 4 — Deep Reasoning**: LLM navigated the winning document's tree → identified "Payment Terms" → drilled into "Late Penalties" → extracted the answer with confidence score and reasoning path
 
 ## How It Works
 

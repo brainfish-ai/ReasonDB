@@ -306,10 +306,11 @@ impl TextIndex {
         let searcher = self.reader.searcher();
 
         // Build query - search across title and content with boosting
-        let query_parser = QueryParser::for_index(
+        let mut query_parser = QueryParser::for_index(
             &self.index,
             vec![self.title_field, self.content_field, self.tags_field],
         );
+        query_parser.set_field_boost(self.title_field, 3.0);
 
         // If table_id is specified, add it to the query
         let query_string = if let Some(tid) = table_id {
