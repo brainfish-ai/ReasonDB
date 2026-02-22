@@ -223,6 +223,11 @@ pub struct CachedMatchedNode {
 pub struct CachedMatch {
     pub document_id: String,
     pub document_title: String,
+    pub table_id: String,
+    pub total_nodes: usize,
+    pub tags: Vec<String>,
+    pub metadata: std::collections::HashMap<String, serde_json::Value>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
     pub score: f32,
     pub confidence: f32,
     pub highlights: Vec<String>,
@@ -238,10 +243,10 @@ pub struct QueryCache {
 
 impl QueryCache {
     /// Create a new query cache
-    /// Default: 1000 queries, 30 minute TTL
+    /// Default: 1000 queries, 5 minute TTL
     pub fn new() -> Self {
         Self {
-            cache: Cache::new(1_000, 1800), // 30 min TTL
+            cache: Cache::new(1_000, 300), // 5 min TTL
             hits: std::sync::atomic::AtomicU64::new(0),
             misses: std::sync::atomic::AtomicU64::new(0),
         }
@@ -417,6 +422,11 @@ mod tests {
             matches: vec![CachedMatch {
                 document_id: "doc1".to_string(),
                 document_title: "Contract".to_string(),
+                table_id: "legal".to_string(),
+                total_nodes: 5,
+                tags: vec!["contract".to_string()],
+                metadata: std::collections::HashMap::new(),
+                created_at: chrono::Utc::now(),
                 score: 0.95,
                 confidence: 0.95,
                 highlights: vec!["late fee of 5%".to_string()],

@@ -18,7 +18,27 @@ impl Parser {
         Self { tokens, pos: 0 }
     }
 
-    /// Parse the tokens into a Query AST.
+    /// Parse the tokens into a Statement (SELECT, UPDATE, or DELETE).
+    pub fn parse_statement(&mut self) -> RqlResult<Statement> {
+        match self.current() {
+            Token::Update => {
+                let update = self.parse_update()?;
+                self.expect_end()?;
+                Ok(Statement::Update(update))
+            }
+            Token::Delete => {
+                let delete = self.parse_delete()?;
+                self.expect_end()?;
+                Ok(Statement::Delete(delete))
+            }
+            _ => {
+                let query = self.parse()?;
+                Ok(Statement::Select(query))
+            }
+        }
+    }
+
+    /// Parse the tokens into a Query AST (SELECT only).
     pub fn parse(&mut self) -> RqlResult<Query> {
         // Check for EXPLAIN prefix
         let explain = self.parse_explain()?;
@@ -52,6 +72,72 @@ impl Parser {
             order_by,
             limit,
         })
+    }
+
+    // ==================== UPDATE ====================
+
+    fn parse_update(&mut self) -> RqlResult<UpdateQuery> {
+        self.expect(Token::Update)?;
+        let table_name = self.parse_identifier()?;
+        let table = FromClause { table: table_name };
+
+        self.expect(Token::Set)?;
+        let assignments = self.parse_set_assignments()?;
+
+        let where_clause = self.parse_where()?;
+
+        Ok(UpdateQuery {
+            table,
+            assignments,
+            where_clause,
+        })
+    }
+
+    fn parse_set_assignments(&mut self) -> RqlResult<Vec<SetAssignment>> {
+        let mut assignments = Vec::new();
+        loop {
+            let field = self.parse_field_path()?;
+            self.expect(Token::Eq)?;
+            let value = self.parse_set_value()?;
+            assignments.push(SetAssignment { field, value });
+
+            if !self.check(&Token::Comma) {
+                break;
+            }
+            self.advance();
+        }
+        Ok(assignments)
+    }
+
+    fn parse_set_value(&mut self) -> RqlResult<Value> {
+        if self.check(&Token::LParen) {
+            let values = self.parse_value_list()?;
+            Ok(Value::Array(values))
+        } else {
+            self.parse_value()
+        }
+    }
+
+    // ==================== DELETE ====================
+
+    fn parse_delete(&mut self) -> RqlResult<DeleteQuery> {
+        self.expect(Token::Delete)?;
+        let from = self.parse_from()?;
+        let where_clause = self.parse_where()?;
+
+        Ok(DeleteQuery {
+            table: from,
+            where_clause,
+        })
+    }
+
+    fn expect_end(&self) -> RqlResult<()> {
+        if !self.is_at_end() {
+            return Err(ParserError::new("Unexpected tokens after statement")
+                .found(format!("{:?}", self.current()))
+                .into());
+        }
+        Ok(())
     }
 
     // ==================== EXPLAIN ====================

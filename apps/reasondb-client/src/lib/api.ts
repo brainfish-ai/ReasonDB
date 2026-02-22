@@ -372,7 +372,14 @@ export interface QueryResult {
   executionTime: number
 }
 
-// Server query response (internal)
+export interface QueryValidationResult {
+  index: number
+  valid: boolean
+  error?: string
+  line?: number
+  column?: number
+}
+
 // SSE progress events from REASON query execution
 export interface ReasonProgressEvent {
   phase: 'candidates' | 'ranking' | 'reasoning'
@@ -565,11 +572,17 @@ class ReasonDBClient {
     })
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({
+      const errorBody = await response.json().catch(() => ({
         error: 'Unknown error',
         message: response.statusText,
       }))
-      throw new Error(error.message || error.error || 'Request failed')
+      const message =
+        errorBody.message ??
+        (typeof errorBody.error === 'string'
+          ? errorBody.error
+          : errorBody.error?.message) ??
+        'Request failed'
+      throw new Error(message)
     }
 
     const data = await response.json() as T
@@ -843,11 +856,17 @@ class ReasonDBClient {
     })
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({
+      const errorBody = await response.json().catch(() => ({
         error: 'Unknown error',
         message: response.statusText,
       }))
-      throw new Error(error.message || error.error || 'Request failed')
+      const message =
+        errorBody.message ??
+        (typeof errorBody.error === 'string'
+          ? errorBody.error
+          : errorBody.error?.message) ??
+        'Request failed'
+      throw new Error(message)
     }
 
     return new Promise<QueryResult>((resolve, reject) => {
@@ -912,6 +931,18 @@ class ReasonDBClient {
 
       processChunk()
     })
+  }
+
+  /**
+   * Validate RQL queries without executing them.
+   * Returns per-query validation results with error positions for editor markers.
+   */
+  async validateQueries(queries: string[]): Promise<QueryValidationResult[]> {
+    const response = await this.request<{ results: QueryValidationResult[] }>('/v1/query/validate', {
+      method: 'POST',
+      body: JSON.stringify({ queries }),
+    })
+    return response.results
   }
 
   private transformQueryResponse(response: QueryServerResponse): QueryResult {

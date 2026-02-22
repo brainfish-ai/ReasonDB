@@ -74,13 +74,13 @@ pub async fn execute_reason_query_with_progress<R: ReasoningEngine + Send + Sync
     // Resolve table name to ID
     let table_id = store.resolve_table_id(&query.from.table)?;
 
-    // Target number of documents to reason on
-    let target_docs = query.limit.as_ref().map(|l| l.count).unwrap_or(10);
+    // LIMIT controls how many results to return; reason over more to find the best ones
+    let result_limit = query.limit.as_ref().map(|l| l.count).unwrap_or(10);
+    let target_docs = (result_limit * 2).max(6).min(20);
 
-    // Build search config
     let config = SearchConfig {
         min_confidence: min_confidence.unwrap_or(0.3),
-        max_results: target_docs,
+        max_results: result_limit,
         ..Default::default()
     };
 
@@ -330,27 +330,38 @@ async fn execute_parallel_reasoning<R: ReasoningEngine + Send + Sync + 'static>(
     query: &Query,
     progress_tx: &Option<mpsc::Sender<ReasonProgress>>,
 ) -> (Vec<DocumentMatch>, usize, usize) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     let total_docs = documents.len();
     let mut all_matches: Vec<DocumentMatch> = Vec::new();
     let mut total_llm_calls = 1; // Count the ranking call
     let mut docs_completed: usize = 0;
+    let target_results = query.limit.as_ref().map(|l| l.count).unwrap_or(10);
+
+    // Shared cancellation flag: set when we have enough results
+    let cancel = Arc::new(AtomicBool::new(false));
 
     // Process in batches for controlled parallelism
     for chunk in documents.chunks(MAX_CONCURRENT) {
-        // Create futures for parallel execution
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+
         let futures: Vec<_> = chunk
             .iter()
             .map(|doc| {
                 let doc = doc.clone();
                 let query = reason_query.to_string();
+                let cancel = cancel.clone();
                 async move {
-                    let result = engine.search_document(&query, &doc.id).await;
+                    let result = engine
+                        .search_document_with_cancel(&query, &doc.id, cancel)
+                        .await;
                     (doc, result)
                 }
             })
             .collect();
 
-        // Execute all futures in parallel
         let results = futures::future::join_all(futures).await;
 
         // Collect results
@@ -404,6 +415,11 @@ async fn execute_parallel_reasoning<R: ReasoningEngine + Send + Sync + 'static>(
                             highlights: vec![],
                             confidence: Some(best_confidence),
                         });
+
+                        // Signal cancellation if we have enough high-confidence results
+                        if all_matches.len() >= target_results {
+                            cancel.store(true, Ordering::Relaxed);
+                        }
                     }
                 }
                 Err(e) => {

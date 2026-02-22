@@ -207,3 +207,8 @@ select:focus-visible {
   from { opacity: 0; transform: translateY(2px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Monaco editor: active statement highlight */
+.active-statement-highlight {
+  background-color: rgba(137, 180, 250, 0.06);
+}

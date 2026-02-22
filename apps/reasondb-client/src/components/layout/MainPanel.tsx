@@ -23,7 +23,14 @@ import { useTabsStore } from '@/stores/tabsStore'
 
 export function MainPanel() {
   const [resultView, setResultView] = useState<'table' | 'json' | 'tree'>('table')
-  const { result } = useQueryStore()
+  const { results, activeResultIndex } = useQueryStore()
+  const activeResult = results.length > 0 ? (results[activeResultIndex] ?? results[0]) : null
+  const totalStats = results.length > 0
+    ? {
+        rowCount: results.reduce((sum, r) => sum + r.rowCount, 0),
+        executionTime: results.reduce((sum, r) => sum + r.executionTime, 0),
+      }
+    : null
   const { selectedTableId, tables, selectTable } = useTableStore()
   const { openConnectionForm } = useUiStore()
   const { activeConnectionId } = useConnectionStore()
@@ -258,9 +265,10 @@ export function MainPanel() {
                 <div className="flex items-center justify-between px-3 py-1.5 bg-surface-0/30 border-b border-border">
                   <div className="flex items-center gap-4">
                     <span className="text-sm text-text font-medium">Results</span>
-                    {result && (
+                    {totalStats && (
                       <span className="text-xs text-overlay-0">
-                        {result.rowCount} rows · {result.executionTime}ms
+                        {totalStats.rowCount} rows · {totalStats.executionTime}ms
+                        {results.length > 1 && ` · ${results.length} queries`}
                       </span>
                     )}
                   </div>
@@ -311,7 +319,7 @@ export function MainPanel() {
                   {resultView === 'table' && <QueryResults />}
                   {resultView === 'json' && (
                     <JsonViewer
-                      data={result?.rows}
+                      data={activeResult?.rows}
                       emptyMessage="Run a query to see results"
                     />
                   )}

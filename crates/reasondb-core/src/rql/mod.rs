@@ -39,11 +39,34 @@ mod tests;
 pub use ast::*;
 pub use error::{RqlError, RqlResult};
 pub use executor::{
-    AggregateResult, AggregateValue, DocumentMatch, MatchedNode, PlanStep, QueryPlan, QueryResult,
-    QueryStats, ReasonPhase, ReasonPhaseStatus, ReasonProgress,
+    AggregateResult, AggregateValue, DocumentMatch, MatchedNode, MutationResult, PlanStep,
+    QueryPlan, QueryResult, QueryStats, ReasonPhase, ReasonPhaseStatus, ReasonProgress,
 };
 
 use crate::model::SearchFilter;
+
+impl Statement {
+    /// Parse an RQL statement string (SELECT, UPDATE, or DELETE).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use reasondb_core::rql::Statement;
+    ///
+    /// let stmt = Statement::parse("DELETE FROM legal WHERE metadata.status = 'expired'").unwrap();
+    /// assert!(matches!(stmt, Statement::Delete(_)));
+    ///
+    /// let stmt = Statement::parse("UPDATE legal SET metadata.status = 'archived' WHERE metadata.status = 'draft'").unwrap();
+    /// assert!(matches!(stmt, Statement::Update(_)));
+    ///
+    /// let stmt = Statement::parse("SELECT * FROM legal").unwrap();
+    /// assert!(matches!(stmt, Statement::Select(_)));
+    /// ```
+    pub fn parse(input: &str) -> RqlResult<Self> {
+        let tokens = lexer::Lexer::new(input).tokenize()?;
+        parser::Parser::new(tokens).parse_statement()
+    }
+}
 
 impl Query {
     /// Parse an RQL query string.

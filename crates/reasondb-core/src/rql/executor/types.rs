@@ -72,6 +72,17 @@ pub struct QueryStats {
     pub llm_calls: usize,
 }
 
+// ==================== Mutation Result ====================
+
+/// Result of executing an UPDATE or DELETE statement.
+#[derive(Debug, Clone)]
+pub struct MutationResult {
+    /// Number of documents affected
+    pub rows_affected: usize,
+    /// Execution time in milliseconds
+    pub execution_time_ms: u64,
+}
+
 // ==================== REASON Progress Types ====================
 
 /// Phase of the REASON query execution pipeline.

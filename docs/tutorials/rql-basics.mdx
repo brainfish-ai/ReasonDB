@@ -12,6 +12,8 @@ In this tutorial, you'll master RQL (ReasonDB Query Language) by building querie
 - Full-text search with SEARCH
 - LLM reasoning with REASON
 - Aggregations and GROUP BY
+- Updating documents with UPDATE
+- Deleting documents with DELETE
 - Combining clauses for powerful queries
 
 ## Setup
@@ -285,6 +287,98 @@ SELECT * FROM books ORDER BY title LIMIT 2
 SELECT * FROM books ORDER BY title LIMIT 2 OFFSET 2
 ```
 
+## Part 7: Updating Documents with UPDATE
+
+RQL supports modifying documents directly via UPDATE statements.
+
+### Update Metadata
+
+Mark a book as a favorite:
+
+```sql
+UPDATE books SET metadata.favorite = true WHERE metadata.author = 'James Morrison'
+```
+
+**Response:**
+```json
+{
+  "rows_affected": 2,
+  "execution_time_ms": 18
+}
+```
+
+### Update Multiple Fields
+
+Change a book's rating and add a review status:
+
+```sql
+UPDATE books SET metadata.rating = 4.9, metadata.reviewed = true
+WHERE title = 'Mars Colony One'
+```
+
+### Update Tags
+
+Replace the tags on a book:
+
+```sql
+UPDATE books SET tags = ('classic', 'must-read') WHERE metadata.rating > 4.5
+```
+
+### Update Title
+
+```sql
+UPDATE books SET title = 'The Quantum Garden (2nd Edition)'
+WHERE metadata.author = 'James Morrison' AND metadata.year = 2023
+```
+
+<Tip>
+Always include a WHERE clause to target specific documents. Without it, UPDATE affects every document in the table.
+</Tip>
+
+## Part 8: Deleting Documents with DELETE
+
+Remove documents you no longer need.
+
+### Delete with Filter
+
+Remove lower-rated books:
+
+```sql
+DELETE FROM books WHERE metadata.rating < 4.3
+```
+
+**Response:**
+```json
+{
+  "rows_affected": 1,
+  "execution_time_ms": 12
+}
+```
+
+### Delete by Tag
+
+```sql
+DELETE FROM books WHERE tags CONTAINS ANY ('historical')
+```
+
+### Delete by Complex Condition
+
+```sql
+DELETE FROM books WHERE metadata.author = 'James Morrison' AND metadata.year < 2024
+```
+
+### Verify After Delete
+
+After deleting, confirm with a SELECT:
+
+```sql
+SELECT COUNT(*) FROM books
+```
+
+<Warning>
+`DELETE FROM books` without a WHERE clause removes **all** documents from the table. This cannot be undone.
+</Warning>
+
 ## Challenges
 
 Test your RQL skills with these exercises:
@@ -313,12 +407,24 @@ Test your RQL skills with these exercises:
     SELECT AVG(metadata.pages) AS avg_pages, metadata.author FROM books GROUP BY metadata.author
     ```
   </Accordion>
+
+  <Accordion title="Challenge 5: Mark all sci-fi books as recommended">
+    ```sql
+    UPDATE books SET metadata.recommended = true WHERE tags CONTAINS ANY ('science-fiction')
+    ```
+  </Accordion>
+
+  <Accordion title="Challenge 6: Delete books with fewer than 300 pages">
+    ```sql
+    DELETE FROM books WHERE metadata.pages < 300
+    ```
+  </Accordion>
 </AccordionGroup>
 
 ## Summary
 
-| Clause | Purpose | Speed |
-|--------|---------|-------|
+| Statement / Clause | Purpose | Speed |
+|--------------------|---------|-------|
 | `SELECT` | Choose fields | Fast |
 | `WHERE` | Filter by metadata | Fast |
 | `SEARCH` | BM25 keyword search | Fast (~50ms) |
@@ -326,6 +432,8 @@ Test your RQL skills with these exercises:
 | `GROUP BY` | Aggregate results | Fast |
 | `ORDER BY` | Sort results | Fast |
 | `LIMIT/OFFSET` | Paginate | Fast |
+| `UPDATE ... SET` | Modify documents | Fast |
+| `DELETE FROM` | Remove documents | Fast |
 
 ## Next Steps
 

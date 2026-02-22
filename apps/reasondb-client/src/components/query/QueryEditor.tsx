@@ -1,15 +1,14 @@
-import { useRef, useEffect, useCallback } from 'react'
+import { useRef, useEffect, useCallback, useState, useMemo } from 'react'
 import Editor, { loader } from '@monaco-editor/react'
 import type * as Monaco from 'monaco-editor'
 import { useHotkeys } from 'react-hotkeys-hook'
-import { Play, FloppyDisk, Clock, CircleNotch, Command } from '@phosphor-icons/react'
+import { Play, FloppyDisk, Clock, CircleNotch, Command, Warning, X } from '@phosphor-icons/react'
 import { registerRqlLanguage, RQL_LANGUAGE_ID, updateRqlTables } from '@/lib/rql-language'
 import { useQueryStore } from '@/stores/queryStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useTableStore } from '@/stores/tableStore'
 import { createClient } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
-import { cn } from '@/lib/utils'
 
 interface QueryEditorProps {
   onExecute?: (query: string) => Promise<void>
@@ -21,7 +20,7 @@ export function QueryEditor({ onExecute, initialQuery, onQueryChange }: QueryEdi
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof Monaco | null>(null)
   
-  const { currentQuery, setCurrentQuery, isExecuting, setIsExecuting, setResult, setError, setReasonProgress, addToHistory } = useQueryStore()
+  const { currentQuery, setCurrentQuery, isExecuting, setIsExecuting, setResults, setError, setReasonProgress, addToHistory } = useQueryStore()
   
   // Use initialQuery if provided (even if empty), otherwise fall back to global currentQuery
   const query = initialQuery !== undefined ? initialQuery : currentQuery
@@ -29,6 +28,22 @@ export function QueryEditor({ onExecute, initialQuery, onQueryChange }: QueryEdi
   const { tables } = useTableStore()
   
   const activeConnection = connections.find((c) => c.id === activeConnectionId)
+  const [warningDismissed, setWarningDismissed] = useState(false)
+
+  const showSemicolonWarning = useMemo(() => {
+    if (warningDismissed) return false
+    const text = query.trim()
+    if (!text) return false
+    const segments = text.split(';').map((s) => s.trim()).filter((s) => s.length > 0)
+    if (segments.length > 1) return false
+    const selectCount = (text.match(/\bSELECT\b/gi) || []).length
+    return selectCount > 1
+  }, [query, warningDismissed])
+
+  // Reset warning dismissed state when query changes structurally
+  useEffect(() => {
+    setWarningDismissed(false)
+  }, [query])
 
   // Sync tables for autocompletion - runs whenever tables change
   useEffect(() => {
@@ -74,7 +89,7 @@ export function QueryEditor({ onExecute, initialQuery, onQueryChange }: QueryEdi
     // Add keyboard shortcuts
     editor.addAction({
       id: 'execute-query',
-      label: 'Execute Query',
+      label: 'Execute Query at Cursor',
       keybindings: [
         monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
       ],
@@ -84,21 +99,108 @@ export function QueryEditor({ onExecute, initialQuery, onQueryChange }: QueryEdi
     })
   }, [])
 
-  // Execute query
-  const handleExecute = useCallback(async () => {
-    const queryText = query.trim()
-    if (!queryText || isExecuting || !activeConnectionId || !activeConnection) return
+  // Detect query boundaries in the editor text.
+  // Each segment has:
+  //   query  – the trimmed SQL text to execute
+  //   start / end – character offsets of the trimmed query text (for highlighting)
+  //   hitStart / hitEnd – expanded offsets that include the surrounding `;` and
+  //                       whitespace so there are no gaps between segments for
+  //                       cursor hit-testing
+  interface QuerySegment { query: string; start: number; end: number; hitStart: number; hitEnd: number }
+
+  const getQuerySegments = useCallback((fullText: string): QuerySegment[] => {
+    const raw: { query: string; start: number; end: number }[] = []
+
+    if (fullText.includes(';')) {
+      // Strategy 1: semicolons
+      let pos = 0
+      for (const part of fullText.split(';')) {
+        const trimmed = part.trim()
+        if (trimmed.length > 0) {
+          const trimStart = pos + (part.length - part.trimStart().length)
+          raw.push({ query: trimmed, start: trimStart, end: trimStart + trimmed.length })
+        }
+        pos += part.length + 1
+      }
+    } else {
+      // Strategy 2: keyword boundaries
+      const kwStart = /^\s*(SELECT|EXPLAIN)\b/i
+      const lines = fullText.split('\n')
+      let curStart = -1
+      let curEnd = 0
+      let lineOff = 0
+
+      const flush = () => {
+        if (curStart < 0) return
+        const slice = fullText.substring(curStart, curEnd)
+        const trimmed = slice.trim()
+        if (trimmed.length > 0) {
+          const leadWs = slice.length - slice.trimStart().length
+          const tStart = curStart + leadWs
+          raw.push({ query: trimmed, start: tStart, end: tStart + trimmed.length })
+        }
+      }
+
+      for (const line of lines) {
+        if (kwStart.test(line) && curStart >= 0) {
+          flush()
+          curStart = lineOff
+        }
+        if (curStart < 0 && line.trim().length > 0) curStart = lineOff
+        curEnd = lineOff + line.length
+        lineOff += line.length + 1
+      }
+      flush()
+    }
+
+    if (raw.length === 0) return []
+
+    // Build hit-test regions: each segment "owns" from halfway-after-previous to
+    // halfway-before-next, so there are never gaps.
+    const segments: QuerySegment[] = raw.map((r, i) => {
+      const hitStart = i === 0 ? 0 : Math.ceil((raw[i - 1].end + r.start) / 2)
+      const hitEnd = i === raw.length - 1 ? fullText.length : Math.floor((r.end + raw[i + 1].start) / 2)
+      return { ...r, hitStart, hitEnd }
+    })
+
+    return segments
+  }, [])
+
+  const splitQueries = useCallback((text: string): string[] => {
+    return getQuerySegments(text).map((s) => s.query)
+  }, [getQuerySegments])
+
+  // Find the query segment that contains the current cursor offset.
+  const getQueryAtCursor = useCallback((): string | null => {
+    const editor = editorRef.current
+    if (!editor) return null
+    const model = editor.getModel()
+    if (!model) return null
+    const position = editor.getPosition()
+    if (!position) return null
+
+    const fullText = model.getValue()
+    const cursorOffset = model.getOffsetAt(position)
+    const segments = getQuerySegments(fullText)
+
+    for (const seg of segments) {
+      if (cursorOffset >= seg.hitStart && cursorOffset <= seg.hitEnd) {
+        return seg.query
+      }
+    }
+    return segments.length > 0 ? segments[0].query : null
+  }, [getQuerySegments])
+
+  // Core execution logic that runs an array of query strings
+  const executeQueries = useCallback(async (queries: string[]) => {
+    if (queries.length === 0 || isExecuting || !activeConnectionId || !activeConnection) return
 
     setIsExecuting(true)
     setError(null)
-    
-    const startTime = Date.now()
-
-    const isReasonQuery = /\bREASON\b/i.test(queryText)
 
     try {
       if (onExecute) {
-        await onExecute(queryText)
+        await onExecute(queries.join(';\n'))
       } else {
         const client = createClient({
           host: activeConnection.host,
@@ -106,59 +208,209 @@ export function QueryEditor({ onExecute, initialQuery, onQueryChange }: QueryEdi
           apiKey: activeConnection.apiKey,
           useSsl: activeConnection.ssl,
         })
-        
-        let result
-        if (isReasonQuery) {
-          setReasonProgress(null)
-          result = await client.executeQueryStream(queryText, (progress) => {
-            setReasonProgress(progress)
-          })
-        } else {
-          result = await client.executeQuery(queryText)
+
+        const allResults: import('@/stores/queryStore').QueryResult[] = []
+
+        for (let i = 0; i < queries.length; i++) {
+          const singleQuery = queries[i]
+          const startTime = Date.now()
+          const isReasonQuery = /\bREASON\b/i.test(singleQuery)
+
+          try {
+            let result
+            if (isReasonQuery) {
+              setReasonProgress(null)
+              result = await client.executeQueryStream(singleQuery, (progress) => {
+                setReasonProgress(progress)
+              })
+            } else {
+              result = await client.executeQuery(singleQuery)
+            }
+
+            const executionTime = Date.now() - startTime
+
+            allResults.push({
+              columns: result.columns || [],
+              rows: result.rows || [],
+              rowCount: result.rowCount || result.rows?.length || 0,
+              executionTime,
+            })
+
+            addToHistory({
+              query: singleQuery,
+              connectionId: activeConnectionId,
+              executedAt: new Date().toISOString(),
+              executionTime,
+              rowCount: result.rowCount || result.rows?.length || 0,
+            })
+          } catch (err) {
+            const executionTime = Date.now() - startTime
+            const errorMessage = err instanceof Error ? err.message : 'Query execution failed'
+            const label = queries.length > 1 ? `Query ${i + 1} failed: ${errorMessage}` : errorMessage
+
+            setError(label)
+
+            addToHistory({
+              query: singleQuery,
+              connectionId: activeConnectionId,
+              executedAt: new Date().toISOString(),
+              executionTime,
+              rowCount: 0,
+              error: errorMessage,
+            })
+
+            if (allResults.length > 0) {
+              setResults(allResults)
+            }
+            return
+          }
         }
 
-        const executionTime = Date.now() - startTime
-        
-        setResult({
-          columns: result.columns || [],
-          rows: result.rows || [],
-          rowCount: result.rowCount || result.rows?.length || 0,
-          executionTime,
-        })
-        
-        addToHistory({
-          query: queryText,
-          connectionId: activeConnectionId,
-          executedAt: new Date().toISOString(),
-          executionTime,
-          rowCount: result.rowCount || result.rows?.length || 0,
-        })
+        setResults(allResults)
       }
     } catch (err) {
-      const executionTime = Date.now() - startTime
       const errorMessage = err instanceof Error ? err.message : 'Query execution failed'
-      
       setError(errorMessage)
-      
-      addToHistory({
-        query: queryText,
-        connectionId: activeConnectionId,
-        executedAt: new Date().toISOString(),
-        executionTime,
-        rowCount: 0,
-        error: errorMessage,
-      })
     } finally {
       setIsExecuting(false)
       setReasonProgress(null)
     }
-  }, [query, isExecuting, activeConnectionId, activeConnection, onExecute, setIsExecuting, setError, setResult, setReasonProgress, addToHistory])
+  }, [isExecuting, activeConnectionId, activeConnection, onExecute, setIsExecuting, setError, setResults, setReasonProgress, addToHistory])
 
-  // Keyboard shortcut for execute
+  // Run only the statement at the current cursor position (Cmd+Enter)
+  const handleExecute = useCallback(() => {
+    const cursorQuery = getQueryAtCursor()
+    if (cursorQuery) {
+      executeQueries([cursorQuery])
+    } else {
+      // Fallback: run everything if we can't determine cursor position
+      const all = splitQueries(query.trim())
+      if (all.length > 0) executeQueries(all)
+    }
+  }, [getQueryAtCursor, executeQueries, splitQueries, query])
+
+  // Keyboard shortcut
   useHotkeys('mod+enter', () => handleExecute(), {
     enableOnFormTags: true,
     preventDefault: true,
   })
+
+  // Highlight the active statement at cursor with a subtle background decoration
+  const decorationsRef = useRef<string[]>([])
+  useEffect(() => {
+    const editor = editorRef.current
+    const monaco = monacoRef.current
+    if (!editor || !monaco) return
+
+    const updateDecoration = () => {
+      const model = editor.getModel()
+      const position = editor.getPosition()
+      if (!model || !position) return
+
+      const fullText = model.getValue()
+      const cursorOffset = model.getOffsetAt(position)
+      const segments = getQuerySegments(fullText)
+
+      let rangeToHighlight: Monaco.Range | null = null
+      for (const seg of segments) {
+        if (cursorOffset >= seg.hitStart && cursorOffset <= seg.hitEnd) {
+          const startPos = model.getPositionAt(seg.start)
+          const endPos = model.getPositionAt(seg.end)
+          rangeToHighlight = new monaco.Range(
+            startPos.lineNumber,
+            startPos.column,
+            endPos.lineNumber,
+            endPos.column
+          )
+          break
+        }
+      }
+
+      if (rangeToHighlight) {
+        decorationsRef.current = editor.deltaDecorations(decorationsRef.current, [
+          {
+            range: rangeToHighlight,
+            options: {
+              isWholeLine: true,
+              className: 'active-statement-highlight',
+            },
+          },
+        ])
+      } else {
+        decorationsRef.current = editor.deltaDecorations(decorationsRef.current, [])
+      }
+    }
+
+    updateDecoration()
+    const disposable = editor.onDidChangeCursorPosition(updateDecoration)
+    const contentDisposable = editor.onDidChangeModelContent(updateDecoration)
+    return () => {
+      disposable.dispose()
+      contentDisposable.dispose()
+    }
+  }, [query, getQuerySegments])
+
+  // Real-time syntax validation via backend /v1/query/validate endpoint
+  useEffect(() => {
+    if (!activeConnection || !editorRef.current || !monacoRef.current) return
+
+    const timer = setTimeout(() => {
+      const text = query.trim()
+      if (!text) {
+        const model = editorRef.current?.getModel()
+        if (model && monacoRef.current) {
+          monacoRef.current.editor.setModelMarkers(model, 'rql-validation', [])
+        }
+        return
+      }
+
+      const segments = getQuerySegments(text)
+      if (segments.length === 0) return
+
+      const client = createClient({
+        host: activeConnection.host,
+        port: activeConnection.port,
+        apiKey: activeConnection.apiKey,
+        useSsl: activeConnection.ssl,
+      })
+
+      client.validateQueries(segments.map((s) => s.query)).then((results) => {
+        const model = editorRef.current?.getModel()
+        const monaco = monacoRef.current
+        if (!model || !monaco) return
+
+        const fullText = model.getValue()
+        const markers: Monaco.editor.IMarkerData[] = []
+
+        // Re-compute segments against full text for accurate offsets
+        const fullSegments = getQuerySegments(fullText)
+
+        for (const r of results) {
+          if (r.valid) continue
+          const seg = fullSegments[r.index]
+          if (!seg) continue
+
+          const startPos = model.getPositionAt(seg.start)
+          const endPos = model.getPositionAt(seg.end)
+
+          markers.push({
+            severity: monaco.MarkerSeverity.Error,
+            message: r.error ?? 'Invalid query syntax',
+            startLineNumber: startPos.lineNumber + (r.line ? r.line - 1 : 0),
+            startColumn: r.line === 1 && r.column ? startPos.column + r.column - 1 : r.column ?? startPos.column,
+            endLineNumber: endPos.lineNumber,
+            endColumn: endPos.column,
+          })
+        }
+
+        monaco.editor.setModelMarkers(model, 'rql-validation', markers)
+      }).catch(() => {
+        // Silently ignore validation network errors
+      })
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [query, activeConnection, getQuerySegments])
 
   // Configure Monaco loader
   useEffect(() => {
@@ -179,7 +431,7 @@ export function QueryEditor({ onExecute, initialQuery, onQueryChange }: QueryEdi
             onClick={handleExecute}
             disabled={isExecuting || !activeConnectionId || !query.trim()}
             className="gap-2 pr-3"
-            title="Execute query (⌘+Enter)"
+            title="Run statement at cursor (⌘+Enter)"
           >
             {isExecuting ? (
               <CircleNotch size={16} className="animate-spin" />
@@ -188,7 +440,7 @@ export function QueryEditor({ onExecute, initialQuery, onQueryChange }: QueryEdi
             )}
             Run
           </Button>
-          
+
           <div className="h-4 w-px bg-border" />
           
           <Button
@@ -231,6 +483,23 @@ export function QueryEditor({ onExecute, initialQuery, onQueryChange }: QueryEdi
           )}
         </div>
       </div>
+
+      {/* Semicolon warning */}
+      {showSemicolonWarning && (
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow/10 border-b border-yellow/30 text-yellow">
+          <Warning size={14} weight="fill" className="shrink-0" />
+          <span className="text-xs">
+            It looks like you have multiple queries. Separate them with <code className="px-1 py-0.5 bg-yellow/10 rounded font-mono">;</code> to run them individually.
+          </span>
+          <button
+            onClick={() => setWarningDismissed(true)}
+            className="ml-auto shrink-0 p-0.5 rounded hover:bg-yellow/20 transition-colors"
+            aria-label="Dismiss warning"
+          >
+            <X size={12} weight="bold" />
+          </button>
+        </div>
+      )}
 
       {/* Editor */}
       <div className="flex-1 min-h-0">

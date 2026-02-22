@@ -34,7 +34,9 @@ interface QueryState {
   // Current query
   currentQuery: string
   isExecuting: boolean
-  result: QueryResult | null
+  executionStartedAt: number | null
+  results: QueryResult[]
+  activeResultIndex: number
   error: string | null
 
   // REASON progress tracking
@@ -50,7 +52,9 @@ interface QueryState {
   // Actions
   setCurrentQuery: (query: string) => void
   setIsExecuting: (isExecuting: boolean) => void
-  setResult: (result: QueryResult | null) => void
+  setExecutionStartedAt: (ts: number | null) => void
+  setResults: (results: QueryResult[]) => void
+  setActiveResultIndex: (index: number) => void
   setError: (error: string | null) => void
   setReasonProgress: (progress: ReasonProgressEvent | null) => void
 
@@ -72,12 +76,14 @@ interface QueryState {
 const initialState = {
   currentQuery: '',
   isExecuting: false,
-  result: null,
-  error: null,
-  reasonProgress: null,
-  history: [],
+  executionStartedAt: null as number | null,
+  results: [] as QueryResult[],
+  activeResultIndex: 0,
+  error: null as string | null,
+  reasonProgress: null as ReasonProgressEvent | null,
+  history: [] as QueryHistoryItem[],
   maxHistoryItems: 100,
-  savedQueries: [],
+  savedQueries: [] as SavedQuery[],
 }
 
 export const useQueryStore = create<QueryState>()(
@@ -86,9 +92,11 @@ export const useQueryStore = create<QueryState>()(
       ...initialState,
 
       setCurrentQuery: (query) => set({ currentQuery: query }),
-      setIsExecuting: (isExecuting) => set({ isExecuting }),
-      setResult: (result) => set({ result, error: null, reasonProgress: null }),
-      setError: (error) => set({ error, result: null, reasonProgress: null }),
+      setIsExecuting: (isExecuting) => set({ isExecuting, executionStartedAt: isExecuting ? Date.now() : null }),
+      setExecutionStartedAt: (ts) => set({ executionStartedAt: ts }),
+      setResults: (results) => set({ results, activeResultIndex: 0, error: null, reasonProgress: null }),
+      setActiveResultIndex: (index) => set({ activeResultIndex: index }),
+      setError: (error) => set({ error, results: [], activeResultIndex: 0, reasonProgress: null }),
       setReasonProgress: (progress) => set({ reasonProgress: progress }),
 
       addToHistory: (item) =>

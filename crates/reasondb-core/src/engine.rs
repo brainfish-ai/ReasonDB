@@ -4,6 +4,7 @@
 //! tree traversal with beam search.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, warn};
@@ -33,8 +34,8 @@ pub struct SearchConfig {
 impl Default for SearchConfig {
     fn default() -> Self {
         Self {
-            beam_width: 3,
-            max_depth: 10,
+            beam_width: 2,
+            max_depth: 5,
             max_results: 5,
             min_confidence: 0.3,
             parallel_branches: true,
@@ -131,6 +132,7 @@ impl<R: ReasoningEngine + 'static> SearchEngine<R> {
         };
 
         // Start traversal
+        let cancel = Arc::new(AtomicBool::new(false));
         self.traverse(
             query,
             &root,
@@ -139,6 +141,7 @@ impl<R: ReasoningEngine + 'static> SearchEngine<R> {
             results.clone(),
             stats.clone(),
             0,
+            cancel,
         )
         .await?;
 
@@ -167,10 +170,59 @@ impl<R: ReasoningEngine + 'static> SearchEngine<R> {
 
     /// Search starting from a document's root node
     pub async fn search_document(&self, query: &str, document_id: &str) -> Result<SearchResponse> {
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.search_document_with_cancel(query, document_id, cancel).await
+    }
+
+    /// Search a document with a shared cancellation flag.
+    /// When `cancel` is set to true, the traversal stops early.
+    pub async fn search_document_with_cancel(
+        &self,
+        query: &str,
+        document_id: &str,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<SearchResponse> {
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(SearchResponse {
+                results: Vec::new(),
+                stats: TraversalStats::default(),
+            });
+        }
+
         let root = self.store.get_root_node(document_id)?;
 
         match root {
-            Some(node) => self.search(query, &node.id).await,
+            Some(node) => {
+                let results = Arc::new(Mutex::new(Vec::new()));
+                let stats = Arc::new(Mutex::new(TraversalStats::default()));
+
+                self.traverse(
+                    query,
+                    &node,
+                    Vec::new(),
+                    Vec::new(),
+                    results.clone(),
+                    stats.clone(),
+                    0,
+                    cancel.clone(),
+                )
+                .await?;
+
+                let mut final_results = results.lock().await.clone();
+                let final_stats = stats.lock().await.clone();
+
+                final_results.sort_by(|a, b| {
+                    b.confidence
+                        .partial_cmp(&a.confidence)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                final_results.truncate(self.config.max_results);
+
+                Ok(SearchResponse {
+                    results: final_results,
+                    stats: final_stats,
+                })
+            }
             None => Ok(SearchResponse {
                 results: Vec::new(),
                 stats: TraversalStats::default(),
@@ -189,8 +241,13 @@ impl<R: ReasoningEngine + 'static> SearchEngine<R> {
         results: Arc<Mutex<Vec<SearchResult>>>,
         stats: Arc<Mutex<TraversalStats>>,
         depth: u8,
+        cancel: Arc<AtomicBool>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move {
+        // Check cancellation
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         // Update stats
         {
             let mut s = stats.lock().await;
@@ -218,7 +275,7 @@ impl<R: ReasoningEngine + 'static> SearchEngine<R> {
         // Base case: leaf node
         if node.is_leaf() {
             return self
-                .verify_leaf(query, node, current_path, reasoning_trace, results, stats)
+                .verify_leaf(query, node, current_path, reasoning_trace, results, stats, cancel)
                 .await;
         }
 
@@ -281,19 +338,54 @@ impl<R: ReasoningEngine + 'static> SearchEngine<R> {
             }
         }
 
-        // Traverse selected branches sequentially
-        // TODO: Add parallel traversal with tokio::spawn once lifetime issues are resolved
-        for (child, trace) in traces {
-            self.traverse(
-                query,
-                &child,
-                current_path.clone(),
-                trace,
-                results.clone(),
-                stats.clone(),
-                depth + 1,
-            )
-            .await?;
+        // Early exit: skip traversal if we already have enough results
+        {
+            let current_results = results.lock().await;
+            if current_results.len() >= self.config.max_results {
+                debug!("Already have {} results, skipping further traversal", current_results.len());
+                return Ok(());
+            }
+        }
+
+        if self.config.parallel_branches && traces.len() > 1 {
+            let children: Vec<PageNode> = traces.iter().map(|(c, _)| c.clone()).collect();
+            let trace_list: Vec<Vec<ReasoningStep>> = traces.into_iter().map(|(_, t)| t).collect();
+
+            let futures: Vec<_> = children
+                .iter()
+                .zip(trace_list.into_iter())
+                .map(|(child, trace)| {
+                    self.traverse(
+                        query,
+                        child,
+                        current_path.clone(),
+                        trace,
+                        results.clone(),
+                        stats.clone(),
+                        depth + 1,
+                        cancel.clone(),
+                    )
+                })
+                .collect();
+
+            let outcomes = futures::future::join_all(futures).await;
+            for outcome in outcomes {
+                outcome?;
+            }
+        } else {
+            for (child, trace) in traces {
+                self.traverse(
+                    query,
+                    &child,
+                    current_path.clone(),
+                    trace,
+                    results.clone(),
+                    stats.clone(),
+                    depth + 1,
+                    cancel.clone(),
+                )
+                .await?;
+            }
         }
 
         Ok(())
@@ -309,7 +401,19 @@ impl<R: ReasoningEngine + 'static> SearchEngine<R> {
         reasoning_trace: Vec<ReasoningStep>,
         results: Arc<Mutex<Vec<SearchResult>>>,
         stats: Arc<Mutex<TraversalStats>>,
+        cancel: Arc<AtomicBool>,
     ) -> Result<()> {
+        // Skip if cancelled or we already have enough results
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        {
+            let current_results = results.lock().await;
+            if current_results.len() >= self.config.max_results {
+                return Ok(());
+            }
+        }
+
         let content = node.get_content();
 
         // Increment LLM call count

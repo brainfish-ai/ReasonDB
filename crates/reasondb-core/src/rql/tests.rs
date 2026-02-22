@@ -413,6 +413,292 @@ fn test_builder_error_missing_from() {
     assert!(result.is_err());
 }
 
+// ==================== UPDATE Parsing Tests ====================
+
+#[test]
+fn test_parse_update_single_field() {
+    let stmt = Statement::parse("UPDATE legal SET metadata.status = 'archived' WHERE metadata.status = 'expired'").unwrap();
+    match stmt {
+        Statement::Update(uq) => {
+            assert_eq!(uq.table.table, "legal");
+            assert_eq!(uq.assignments.len(), 1);
+            assert_eq!(uq.assignments[0].field.to_string(), "metadata.status");
+            assert_eq!(uq.assignments[0].value, Value::String("archived".to_string()));
+            assert!(uq.where_clause.is_some());
+        }
+        _ => panic!("Expected Update statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_multiple_fields() {
+    let stmt = Statement::parse(
+        "UPDATE legal SET metadata.status = 'active', title = 'New Title' WHERE metadata.author = 'Alice'"
+    ).unwrap();
+    match stmt {
+        Statement::Update(uq) => {
+            assert_eq!(uq.assignments.len(), 2);
+            assert_eq!(uq.assignments[0].field.to_string(), "metadata.status");
+            assert_eq!(uq.assignments[1].field.to_string(), "title");
+            assert_eq!(uq.assignments[1].value, Value::String("New Title".to_string()));
+        }
+        _ => panic!("Expected Update statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_no_where() {
+    let stmt = Statement::parse("UPDATE legal SET metadata.status = 'archived'").unwrap();
+    match stmt {
+        Statement::Update(uq) => {
+            assert!(uq.where_clause.is_none());
+        }
+        _ => panic!("Expected Update statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_with_tags_array() {
+    let stmt = Statement::parse("UPDATE legal SET tags = ('important', 'reviewed')").unwrap();
+    match stmt {
+        Statement::Update(uq) => {
+            assert_eq!(uq.assignments.len(), 1);
+            assert_eq!(
+                uq.assignments[0].value,
+                Value::Array(vec![
+                    Value::String("important".to_string()),
+                    Value::String("reviewed".to_string()),
+                ])
+            );
+        }
+        _ => panic!("Expected Update statement"),
+    }
+}
+
+// ==================== DELETE Parsing Tests ====================
+
+#[test]
+fn test_parse_delete_with_where() {
+    let stmt = Statement::parse("DELETE FROM legal WHERE metadata.status = 'expired'").unwrap();
+    match stmt {
+        Statement::Delete(dq) => {
+            assert_eq!(dq.table.table, "legal");
+            assert!(dq.where_clause.is_some());
+        }
+        _ => panic!("Expected Delete statement"),
+    }
+}
+
+#[test]
+fn test_parse_delete_all() {
+    let stmt = Statement::parse("DELETE FROM legal").unwrap();
+    match stmt {
+        Statement::Delete(dq) => {
+            assert_eq!(dq.table.table, "legal");
+            assert!(dq.where_clause.is_none());
+        }
+        _ => panic!("Expected Delete statement"),
+    }
+}
+
+#[test]
+fn test_parse_delete_complex_where() {
+    let stmt = Statement::parse(
+        "DELETE FROM legal WHERE metadata.author = 'Alice' AND metadata.value < 30000"
+    ).unwrap();
+    match stmt {
+        Statement::Delete(dq) => {
+            assert!(dq.where_clause.is_some());
+            match dq.where_clause.unwrap().condition {
+                Condition::And(_, _) => {}
+                _ => panic!("Expected AND condition"),
+            }
+        }
+        _ => panic!("Expected Delete statement"),
+    }
+}
+
+// ==================== Statement::parse backward compat ====================
+
+#[test]
+fn test_statement_parse_select() {
+    let stmt = Statement::parse("SELECT * FROM legal WHERE metadata.status = 'active'").unwrap();
+    match stmt {
+        Statement::Select(q) => {
+            assert_eq!(q.from.table, "legal");
+            assert!(q.where_clause.is_some());
+        }
+        _ => panic!("Expected Select statement"),
+    }
+}
+
+// ==================== UPDATE Execution Tests ====================
+
+#[test]
+fn test_execute_update_metadata() {
+    let (store, _dir) = create_test_store();
+    setup_test_data(&store);
+
+    let stmt = Statement::parse(
+        "UPDATE legal SET metadata.status = 'archived' WHERE metadata.status = 'expired'"
+    ).unwrap();
+    match stmt {
+        Statement::Update(ref uq) => {
+            let result = store.execute_update(uq).unwrap();
+            assert_eq!(result.rows_affected, 1);
+        }
+        _ => panic!("Expected Update"),
+    }
+
+    // Verify the update persisted
+    let query = Query::parse("SELECT * FROM legal WHERE metadata.status = 'archived'").unwrap();
+    let result = store.execute_rql(&query).unwrap();
+    assert_eq!(result.total_count, 1);
+    assert_eq!(result.documents[0].document.title, "Contract C");
+}
+
+#[test]
+fn test_execute_update_title() {
+    let (store, _dir) = create_test_store();
+    setup_test_data(&store);
+
+    let stmt = Statement::parse(
+        "UPDATE legal SET title = 'Renamed Contract' WHERE metadata.author = 'Bob'"
+    ).unwrap();
+    match stmt {
+        Statement::Update(ref uq) => {
+            let result = store.execute_update(uq).unwrap();
+            assert_eq!(result.rows_affected, 1);
+        }
+        _ => panic!("Expected Update"),
+    }
+
+    let query = Query::parse("SELECT * FROM legal WHERE metadata.author = 'Bob'").unwrap();
+    let result = store.execute_rql(&query).unwrap();
+    assert_eq!(result.documents[0].document.title, "Renamed Contract");
+}
+
+#[test]
+fn test_execute_update_multiple_rows() {
+    let (store, _dir) = create_test_store();
+    setup_test_data(&store);
+
+    let stmt = Statement::parse(
+        "UPDATE legal SET metadata.reviewed = true WHERE metadata.author = 'Alice'"
+    ).unwrap();
+    match stmt {
+        Statement::Update(ref uq) => {
+            let result = store.execute_update(uq).unwrap();
+            assert_eq!(result.rows_affected, 2);
+        }
+        _ => panic!("Expected Update"),
+    }
+}
+
+#[test]
+fn test_execute_update_no_match() {
+    let (store, _dir) = create_test_store();
+    setup_test_data(&store);
+
+    let stmt = Statement::parse(
+        "UPDATE legal SET metadata.status = 'x' WHERE metadata.author = 'Nobody'"
+    ).unwrap();
+    match stmt {
+        Statement::Update(ref uq) => {
+            let result = store.execute_update(uq).unwrap();
+            assert_eq!(result.rows_affected, 0);
+        }
+        _ => panic!("Expected Update"),
+    }
+}
+
+// ==================== DELETE Execution Tests ====================
+
+#[test]
+fn test_execute_delete_with_where() {
+    let (store, _dir) = create_test_store();
+    setup_test_data(&store);
+
+    let stmt = Statement::parse(
+        "DELETE FROM legal WHERE metadata.status = 'expired'"
+    ).unwrap();
+    match stmt {
+        Statement::Delete(ref dq) => {
+            let result = store.execute_delete(dq).unwrap();
+            assert_eq!(result.rows_affected, 1);
+        }
+        _ => panic!("Expected Delete"),
+    }
+
+    // Verify only 2 documents remain
+    let query = Query::parse("SELECT * FROM legal").unwrap();
+    let result = store.execute_rql(&query).unwrap();
+    assert_eq!(result.total_count, 2);
+}
+
+#[test]
+fn test_execute_delete_multiple() {
+    let (store, _dir) = create_test_store();
+    setup_test_data(&store);
+
+    let stmt = Statement::parse(
+        "DELETE FROM legal WHERE metadata.author = 'Alice'"
+    ).unwrap();
+    match stmt {
+        Statement::Delete(ref dq) => {
+            let result = store.execute_delete(dq).unwrap();
+            assert_eq!(result.rows_affected, 2);
+        }
+        _ => panic!("Expected Delete"),
+    }
+
+    let query = Query::parse("SELECT * FROM legal").unwrap();
+    let result = store.execute_rql(&query).unwrap();
+    assert_eq!(result.total_count, 1);
+    assert_eq!(result.documents[0].document.title, "Contract B");
+}
+
+#[test]
+fn test_execute_delete_all() {
+    let (store, _dir) = create_test_store();
+    setup_test_data(&store);
+
+    let stmt = Statement::parse("DELETE FROM legal").unwrap();
+    match stmt {
+        Statement::Delete(ref dq) => {
+            let result = store.execute_delete(dq).unwrap();
+            assert_eq!(result.rows_affected, 3);
+        }
+        _ => panic!("Expected Delete"),
+    }
+
+    let query = Query::parse("SELECT * FROM legal").unwrap();
+    let result = store.execute_rql(&query).unwrap();
+    assert_eq!(result.total_count, 0);
+}
+
+#[test]
+fn test_execute_delete_no_match() {
+    let (store, _dir) = create_test_store();
+    setup_test_data(&store);
+
+    let stmt = Statement::parse(
+        "DELETE FROM legal WHERE metadata.author = 'Nobody'"
+    ).unwrap();
+    match stmt {
+        Statement::Delete(ref dq) => {
+            let result = store.execute_delete(dq).unwrap();
+            assert_eq!(result.rows_affected, 0);
+        }
+        _ => panic!("Expected Delete"),
+    }
+
+    // All 3 should remain
+    let query = Query::parse("SELECT * FROM legal").unwrap();
+    let result = store.execute_rql(&query).unwrap();
+    assert_eq!(result.total_count, 3);
+}
+
 // ==================== BM25 Search Tests ====================
 
 #[test]

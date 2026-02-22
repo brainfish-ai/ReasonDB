@@ -1,11 +1,13 @@
 ---
 title: RQL Query Language
-description: Use SQL-like queries with SEARCH and REASON clauses
+description: Use SQL-like queries with SEARCH, REASON, UPDATE, and DELETE clauses
 ---
 
-ReasonDB Query Language (RQL) provides SQL-like syntax for querying documents. It combines traditional filtering with BM25 full-text search and LLM semantic reasoning.
+ReasonDB Query Language (RQL) provides SQL-like syntax for querying, updating, and deleting documents. It combines traditional filtering with BM25 full-text search and LLM semantic reasoning.
 
 ## Basic Syntax
+
+### SELECT
 
 ```sql
 SELECT [fields] FROM <table>
@@ -17,6 +19,20 @@ SELECT [fields] FROM <table>
 [ORDER BY <field>]
 [LIMIT <n>]
 [OFFSET <n>]
+```
+
+### UPDATE
+
+```sql
+UPDATE <table> SET <field> = <value> [, <field> = <value> ...]
+[WHERE <conditions>]
+```
+
+### DELETE
+
+```sql
+DELETE FROM <table>
+[WHERE <conditions>]
 ```
 
 ## Query Endpoint
@@ -300,6 +316,104 @@ Result:
 }
 ```
 
+## UPDATE
+
+Modify documents that match a condition. The SET clause supports document fields, metadata, and tags.
+
+### Update Metadata Fields
+
+```sql
+-- Set a single metadata field
+UPDATE legal SET metadata.status = 'archived' WHERE metadata.status = 'expired'
+
+-- Set multiple fields at once
+UPDATE contracts SET metadata.status = 'reviewed', metadata.reviewer = 'Alice'
+WHERE metadata.status = 'pending'
+```
+
+### Update Document Title
+
+```sql
+UPDATE legal SET title = 'Updated NDA Agreement' WHERE metadata.author = 'Bob'
+```
+
+### Update Tags
+
+Replace the tags array with a new set of values:
+
+```sql
+UPDATE legal SET tags = ('reviewed', 'final') WHERE metadata.status = 'active'
+```
+
+### Update Nested Metadata
+
+```sql
+UPDATE legal SET metadata.employee.department = 'Legal' WHERE metadata.employee.name = 'John Smith'
+```
+
+### Update All Documents
+
+Omitting the WHERE clause updates every document in the table:
+
+```sql
+UPDATE legal SET metadata.reviewed = true
+```
+
+<Warning>
+UPDATE without a WHERE clause affects **all** documents in the table. Always double-check your query before executing.
+</Warning>
+
+### Update Response
+
+```json
+{
+  "rows_affected": 3,
+  "execution_time_ms": 45
+}
+```
+
+## DELETE
+
+Remove documents that match a condition.
+
+### Delete with Filter
+
+```sql
+-- Delete expired documents
+DELETE FROM legal WHERE metadata.status = 'expired'
+
+-- Delete by author
+DELETE FROM contracts WHERE metadata.author = 'Bob'
+```
+
+### Delete with Complex Conditions
+
+```sql
+DELETE FROM legal
+WHERE metadata.author = 'Alice' AND metadata.value < 10000
+```
+
+### Delete All Documents
+
+Omitting the WHERE clause deletes every document in the table:
+
+```sql
+DELETE FROM legal
+```
+
+<Warning>
+DELETE without a WHERE clause removes **all** documents from the table. This cannot be undone.
+</Warning>
+
+### Delete Response
+
+```json
+{
+  "rows_affected": 5,
+  "execution_time_ms": 32
+}
+```
+
 ## Complete Examples
 
 ### Legal Document Search
@@ -339,6 +453,19 @@ FROM research_papers
 WHERE tags CONTAINS ANY ('machine-learning')
 ORDER BY created_at DESC
 LIMIT 20 OFFSET 40
+```
+
+### Bulk Status Update
+
+```sql
+UPDATE contracts SET metadata.status = 'archived', metadata.archived_by = 'system'
+WHERE metadata.status = 'expired' AND metadata.value_usd < 5000
+```
+
+### Cleanup Old Documents
+
+```sql
+DELETE FROM drafts WHERE metadata.status = 'abandoned'
 ```
 
 ## Error Handling

@@ -608,4 +608,178 @@ impl NodeStore {
             explain: None,
         })
     }
+
+    // ==================== UPDATE Execution ====================
+
+    /// Execute an UPDATE query.
+    ///
+    /// Finds matching documents via the WHERE clause, applies SET assignments,
+    /// and persists the changes.
+    ///
+    /// # Supported SET targets
+    ///
+    /// - `title = 'new title'` — update document title
+    /// - `metadata.key = value` — set a metadata field
+    /// - `tags = ('tag1', 'tag2')` — replace tags
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use reasondb_core::{NodeStore, rql::Statement};
+    ///
+    /// let store = NodeStore::open("./test.db").unwrap();
+    /// let stmt = Statement::parse("UPDATE legal SET metadata.status = 'archived' WHERE metadata.status = 'expired'").unwrap();
+    /// if let Statement::Update(ref uq) = stmt {
+    ///     let result = store.execute_update(uq).unwrap();
+    ///     println!("Updated {} documents", result.rows_affected);
+    /// }
+    /// ```
+    pub fn execute_update(&self, query: &UpdateQuery) -> Result<MutationResult> {
+        let start = std::time::Instant::now();
+
+        let table_id = self.resolve_table_id(&query.table.table)?;
+
+        let filter = {
+            let mut f = crate::model::SearchFilter::new();
+            f.table_id = Some(table_id.clone());
+            f
+        };
+        let documents = self.find_documents(&filter)?;
+
+        let filtered = if let Some(ref wc) = query.where_clause {
+            documents
+                .into_iter()
+                .filter(|doc| filter::matches_condition(self, doc, &wc.condition))
+                .collect::<Vec<_>>()
+        } else {
+            documents
+        };
+
+        let mut rows_affected = 0;
+        for mut doc in filtered {
+            Self::apply_assignments(&mut doc, &query.assignments);
+            self.update_document(&doc)?;
+            rows_affected += 1;
+        }
+
+        Ok(MutationResult {
+            rows_affected,
+            execution_time_ms: start.elapsed().as_millis() as u64,
+        })
+    }
+
+    /// Apply SET assignments to a document in-place.
+    fn apply_assignments(doc: &mut crate::model::Document, assignments: &[SetAssignment]) {
+        for assignment in assignments {
+            let field_str = assignment.field.to_string();
+            let json_val = assignment.value.to_json();
+
+            match field_str.as_str() {
+                "title" => {
+                    if let serde_json::Value::String(s) = &json_val {
+                        doc.title = s.clone();
+                    }
+                }
+                "tags" => {
+                    if let Value::Array(arr) = &assignment.value {
+                        doc.tags = arr
+                            .iter()
+                            .filter_map(|v| {
+                                if let Value::String(s) = v {
+                                    Some(s.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+                    }
+                }
+                f if f.starts_with("metadata.") => {
+                    let key = f.strip_prefix("metadata.").unwrap();
+                    if let Some(dot_pos) = key.find('.') {
+                        let top_key = &key[..dot_pos];
+                        let rest = &key[dot_pos + 1..];
+                        let existing = doc
+                            .metadata
+                            .entry(top_key.to_string())
+                            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+                        Self::set_nested_json(existing, rest, json_val);
+                    } else {
+                        doc.metadata.insert(key.to_string(), json_val);
+                    }
+                }
+                _ => {}
+            }
+            doc.updated_at = chrono::Utc::now();
+        }
+    }
+
+    /// Set a value at a dot-separated path inside a JSON value.
+    fn set_nested_json(target: &mut serde_json::Value, path: &str, value: serde_json::Value) {
+        if let Some(dot_pos) = path.find('.') {
+            let key = &path[..dot_pos];
+            let rest = &path[dot_pos + 1..];
+            if let serde_json::Value::Object(map) = target {
+                let entry = map
+                    .entry(key.to_string())
+                    .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+                Self::set_nested_json(entry, rest, value);
+            }
+        } else if let serde_json::Value::Object(map) = target {
+            map.insert(path.to_string(), value);
+        }
+    }
+
+    // ==================== DELETE Execution ====================
+
+    /// Execute a DELETE query.
+    ///
+    /// Finds matching documents via the WHERE clause and deletes them
+    /// (including all their nodes).
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use reasondb_core::{NodeStore, rql::Statement};
+    ///
+    /// let store = NodeStore::open("./test.db").unwrap();
+    /// let stmt = Statement::parse("DELETE FROM legal WHERE metadata.status = 'expired'").unwrap();
+    /// if let Statement::Delete(ref dq) = stmt {
+    ///     let result = store.execute_delete(dq).unwrap();
+    ///     println!("Deleted {} documents", result.rows_affected);
+    /// }
+    /// ```
+    pub fn execute_delete(&self, query: &DeleteQuery) -> Result<MutationResult> {
+        let start = std::time::Instant::now();
+
+        let table_id = self.resolve_table_id(&query.table.table)?;
+
+        let filter = {
+            let mut f = crate::model::SearchFilter::new();
+            f.table_id = Some(table_id.clone());
+            f
+        };
+        let documents = self.find_documents(&filter)?;
+
+        let filtered = if let Some(ref wc) = query.where_clause {
+            documents
+                .into_iter()
+                .filter(|doc| filter::matches_condition(self, doc, &wc.condition))
+                .collect::<Vec<_>>()
+        } else {
+            documents
+        };
+
+        let mut rows_affected = 0;
+        for doc in &filtered {
+            if self.delete_document(&doc.id)? {
+                rows_affected += 1;
+            }
+        }
+
+        Ok(MutationResult {
+            rows_affected,
+            execution_time_ms: start.elapsed().as_millis() as u64,
+        })
+    }
 }

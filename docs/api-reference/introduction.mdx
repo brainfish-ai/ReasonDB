@@ -78,12 +78,12 @@ Authentication is optional in development. Enable for production with `--auth-en
 | `POST` | `/v1/ingest/file` | Upload and process file (PDF, HTML, etc.) |
 | `POST` | `/v1/ingest/url` | Fetch and ingest from URL |
 
-### Search & Query — Find Answers
+### Search & Query — Find, Update, Delete
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/v1/search` | LLM-guided tree traversal with answer extraction |
-| `POST` | `/v1/query` | Execute RQL query with optional REASON clause |
+| `POST` | `/v1/query` | Execute RQL statements (SELECT, UPDATE, DELETE) |
 
 ### Documents — Manage Content
 
@@ -141,6 +141,24 @@ curl -X POST http://localhost:4444/v1/query \
   }'
 ```
 
+### Workflow 3: Update and Delete via RQL
+
+```bash
+# Update documents matching a condition
+curl -X POST http://localhost:4444/v1/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "UPDATE Contracts SET metadata.status = '\''archived'\'' WHERE metadata.status = '\''expired'\''"
+  }'
+
+# Delete documents matching a condition
+curl -X POST http://localhost:4444/v1/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "DELETE FROM Contracts WHERE metadata.status = '\''abandoned'\''"
+  }'
+```
+
 ## Response Format
 
 ### Search Response (`/v1/search`)
@@ -182,6 +200,15 @@ curl -X POST http://localhost:4444/v1/query \
   }],
   "total_count": 1,
   "execution_time_ms": 1250
+}
+```
+
+### Mutation Response (`/v1/query` — UPDATE / DELETE)
+
+```json
+{
+  "rows_affected": 5,
+  "execution_time_ms": 32
 }
 ```
 

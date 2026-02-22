@@ -11,6 +11,9 @@ pub enum Token {
     Select,
     From,
     Where,
+    Update,
+    Delete,
+    Set,
     And,
     Or,
     Not,
@@ -90,6 +93,9 @@ impl Token {
             Token::Select
                 | Token::From
                 | Token::Where
+                | Token::Update
+                | Token::Delete
+                | Token::Set
                 | Token::And
                 | Token::Or
                 | Token::Not
@@ -349,6 +355,9 @@ impl Lexer {
             "SELECT" => Token::Select,
             "FROM" => Token::From,
             "WHERE" => Token::Where,
+            "UPDATE" => Token::Update,
+            "DELETE" => Token::Delete,
+            "SET" => Token::Set,
             "AND" => Token::And,
             "OR" => Token::Or,
             "NOT" => Token::Not,
@@ -572,6 +581,43 @@ mod tests {
                 Token::LBracket,
                 Token::Number(0.0),
                 Token::RBracket,
+                Token::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn test_update_tokens() {
+        let mut lexer = Lexer::new("UPDATE t SET x = 1");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Update,
+                Token::Identifier("t".to_string()),
+                Token::Set,
+                Token::Identifier("x".to_string()),
+                Token::Eq,
+                Token::Number(1.0),
+                Token::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn test_delete_tokens() {
+        let mut lexer = Lexer::new("DELETE FROM t WHERE x = 1");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Delete,
+                Token::From,
+                Token::Identifier("t".to_string()),
+                Token::Where,
+                Token::Identifier("x".to_string()),
+                Token::Eq,
+                Token::Number(1.0),
                 Token::Eof
             ]
         );

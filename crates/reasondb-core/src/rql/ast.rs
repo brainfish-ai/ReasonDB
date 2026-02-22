@@ -5,6 +5,46 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+/// A parsed RQL statement (SELECT, UPDATE, or DELETE).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Statement {
+    /// SELECT query
+    Select(Query),
+    /// UPDATE query
+    Update(UpdateQuery),
+    /// DELETE query
+    Delete(DeleteQuery),
+}
+
+/// An UPDATE query: `UPDATE table SET field = value, ... WHERE condition`
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateQuery {
+    /// Target table
+    pub table: FromClause,
+    /// Field assignments (SET clause)
+    pub assignments: Vec<SetAssignment>,
+    /// Optional WHERE clause to filter which documents to update
+    pub where_clause: Option<WhereClause>,
+}
+
+/// A single SET assignment: `field = value`
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetAssignment {
+    /// Field path to update
+    pub field: FieldPath,
+    /// New value
+    pub value: Value,
+}
+
+/// A DELETE query: `DELETE FROM table WHERE condition`
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeleteQuery {
+    /// Target table
+    pub table: FromClause,
+    /// Optional WHERE clause to filter which documents to delete
+    pub where_clause: Option<WhereClause>,
+}
+
 /// A complete parsed RQL query.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {

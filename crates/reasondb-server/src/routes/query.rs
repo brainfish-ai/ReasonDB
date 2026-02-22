@@ -4,8 +4,9 @@
 
 use axum::{extract::State, response::sse::{Event, Sse}, Json};
 use futures::stream::{Stream, StreamExt};
+use futures::FutureExt;
 use reasondb_core::llm::ReasoningEngine;
-use reasondb_core::rql::{AggregateValue, DocumentMatch, MatchedNode, Query, QueryResult, QueryStats, ReasonProgress};
+use reasondb_core::rql::{AggregateValue, DocumentMatch, MatchedNode, MutationResult, Query, QueryResult, QueryStats, ReasonProgress, Statement};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -222,6 +223,128 @@ impl From<QueryResult> for QueryResponse {
     }
 }
 
+/// Response for UPDATE/DELETE mutations
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MutationResponse {
+    /// Number of documents affected
+    pub rows_affected: usize,
+    /// Execution time in milliseconds
+    pub execution_time_ms: u64,
+}
+
+impl From<MutationResult> for MutationResponse {
+    fn from(r: MutationResult) -> Self {
+        Self {
+            rows_affected: r.rows_affected,
+            execution_time_ms: r.execution_time_ms,
+        }
+    }
+}
+
+/// Unified response for all RQL statement types
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(untagged)]
+pub enum StatementResponse {
+    /// Response for SELECT queries
+    Query(QueryResponse),
+    /// Response for UPDATE/DELETE mutations
+    Mutation(MutationResponse),
+}
+
+/// Validate request: array of query strings to check
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ValidateRequest {
+    /// Array of individual query strings to validate
+    pub queries: Vec<String>,
+}
+
+/// Validation result for a single query
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ValidationResult {
+    /// Index of the query in the input array
+    pub index: usize,
+    /// Whether the query is syntactically valid
+    pub valid: bool,
+    /// Error message if invalid
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Line number of the error (1-indexed)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+    /// Column number of the error (1-indexed)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column: Option<usize>,
+}
+
+/// Validate response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ValidateResponse {
+    pub results: Vec<ValidationResult>,
+}
+
+/// Validate one or more RQL queries without executing them.
+///
+/// Parses each query and returns structured error information including
+/// line/column positions for editor integration.
+#[utoipa::path(
+    post,
+    path = "/v1/query/validate",
+    request_body = ValidateRequest,
+    responses(
+        (status = 200, description = "Validation results", body = ValidateResponse),
+    ),
+    tag = "query"
+)]
+pub async fn validate_query<R: ReasoningEngine + Send + Sync + 'static>(
+    State(_state): State<Arc<AppState<R>>>,
+    Json(request): Json<ValidateRequest>,
+) -> Json<ValidateResponse> {
+    use reasondb_core::rql::RqlError;
+
+    let results = request
+        .queries
+        .iter()
+        .enumerate()
+        .map(|(index, q)| {
+            let trimmed = q.trim();
+            if trimmed.is_empty() {
+                return ValidationResult {
+                    index,
+                    valid: true,
+                    error: None,
+                    line: None,
+                    column: None,
+                };
+            }
+            match Statement::parse(trimmed) {
+                Ok(_) => ValidationResult {
+                    index,
+                    valid: true,
+                    error: None,
+                    line: None,
+                    column: None,
+                },
+                Err(e) => {
+                    let (line, column) = match &e {
+                        RqlError::Lexer(le) => (Some(le.line), Some(le.column)),
+                        RqlError::Parser(_) => (Some(1), Some(1)),
+                        _ => (None, None),
+                    };
+                    ValidationResult {
+                        index,
+                        valid: false,
+                        error: Some(e.to_string()),
+                        line,
+                        column,
+                    }
+                }
+            }
+        })
+        .collect();
+
+    Json(ValidateResponse { results })
+}
+
 /// Execute an RQL query
 ///
 /// Supports:
@@ -261,16 +384,42 @@ impl From<QueryResult> for QueryResponse {
 pub async fn execute_query<R: ReasoningEngine + Send + Sync + 'static>(
     State(state): State<Arc<AppState<R>>>,
     Json(request): Json<QueryRequest>,
-) -> Result<Json<QueryResponse>, ApiError> {
+) -> Result<Json<StatementResponse>, ApiError> {
+    // Parse as a general statement (SELECT, UPDATE, or DELETE)
+    let stmt = Statement::parse(&request.query)
+        .map_err(|e| ApiError::BadRequest(format!("Invalid query: {}", e)))?;
+
+    match stmt {
+        Statement::Update(ref uq) => {
+            let result = state
+                .store
+                .execute_update(uq)
+                .map_err(|e| ApiError::Internal(format!("Update failed: {}", e)))?;
+            Ok(Json(StatementResponse::Mutation(result.into())))
+        }
+        Statement::Delete(ref dq) => {
+            let result = state
+                .store
+                .execute_delete(dq)
+                .map_err(|e| ApiError::Internal(format!("Delete failed: {}", e)))?;
+            Ok(Json(StatementResponse::Mutation(result.into())))
+        }
+        Statement::Select(ref query) => {
+            let result = execute_select_query(query, &state).await?;
+            Ok(Json(StatementResponse::Query(result.into())))
+        }
+    }
+}
+
+/// Execute a SELECT query, handling REASON caching and search.
+async fn execute_select_query<R: ReasoningEngine + Send + Sync + 'static>(
+    query: &Query,
+    state: &Arc<AppState<R>>,
+) -> Result<QueryResult, ApiError> {
     use reasondb_core::cache::{CachedMatch, CachedQueryResult};
     use std::time::Instant;
 
-    // Parse the query
-    let query = Query::parse(&request.query)
-        .map_err(|e| ApiError::BadRequest(format!("Invalid query: {}", e)))?;
-
-    // Check if this is a REASON query (needs async LLM execution)
-    let result = if let Some(ref reason_clause) = query.reason {
+    if let Some(ref reason_clause) = query.reason {
         // Check cache first for REASON queries
         if let Some(cached) = state.query_cache.get(&reason_clause.query, &query.from.table) {
             tracing::info!(
@@ -279,7 +428,6 @@ pub async fn execute_query<R: ReasoningEngine + Send + Sync + 'static>(
                 cached.llm_calls_saved
             );
             
-            // Convert cached result to QueryResult
             let matches: Vec<DocumentMatch> = cached.matches.iter().map(|m| {
                 let matched_nodes = m.matched_nodes.iter().map(|n| {
                     MatchedNode {
@@ -291,8 +439,14 @@ pub async fn execute_query<R: ReasoningEngine + Send + Sync + 'static>(
                         reasoning_trace: vec![],
                     }
                 }).collect();
+                let mut doc = reasondb_core::Document::new(m.document_title.clone(), &m.table_id);
+                doc.id = m.document_id.clone();
+                doc.total_nodes = m.total_nodes;
+                doc.tags = m.tags.clone();
+                doc.metadata = m.metadata.clone();
+                doc.created_at = m.created_at;
                 DocumentMatch {
-                    document: reasondb_core::Document::new(m.document_title.clone(), &cached.table_id),
+                    document: doc,
                     score: Some(m.score),
                     matched_nodes,
                     highlights: m.highlights.clone(),
@@ -300,7 +454,7 @@ pub async fn execute_query<R: ReasoningEngine + Send + Sync + 'static>(
                 }
             }).collect();
             
-            QueryResult {
+            Ok(QueryResult {
                 documents: matches,
                 total_count: cached.matches.len(),
                 execution_time_ms: 0,
@@ -314,20 +468,23 @@ pub async fn execute_query<R: ReasoningEngine + Send + Sync + 'static>(
                 },
                 aggregates: None,
                 explain: None,
-            }
+            })
         } else {
-            // Cache miss - execute query
             let result = state
                 .store
-                .execute_rql_async(&query, Some(state.text_index.as_ref()), state.reasoner.clone())
+                .execute_rql_async(query, Some(state.text_index.as_ref()), state.reasoner.clone())
                 .await
                 .map_err(|e| ApiError::Internal(format!("Query execution failed: {}", e)))?;
             
-            // Cache the result
             let cached_matches: Vec<CachedMatch> = result.documents.iter().map(|m| {
                 CachedMatch {
                     document_id: m.document.id.clone(),
                     document_title: m.document.title.clone(),
+                    table_id: m.document.table_id.clone(),
+                    total_nodes: m.document.total_nodes,
+                    tags: m.document.tags.clone(),
+                    metadata: m.document.metadata.clone(),
+                    created_at: m.document.created_at,
                     score: m.score.unwrap_or(0.0),
                     confidence: m.confidence.unwrap_or(0.0),
                     highlights: m.highlights.clone(),
@@ -358,17 +515,14 @@ pub async fn execute_query<R: ReasoningEngine + Send + Sync + 'static>(
                 result.documents.len()
             );
             
-            result
+            Ok(result)
         }
     } else {
-        // Use sync executor for SEARCH/WHERE queries (no caching needed - fast enough)
         state
             .store
-            .execute_rql_with_search(&query, Some(state.text_index.as_ref()))
-            .map_err(|e| ApiError::Internal(format!("Query execution failed: {}", e)))?
-    };
-
-    Ok(Json(result.into()))
+            .execute_rql_with_search(query, Some(state.text_index.as_ref()))
+            .map_err(|e| ApiError::Internal(format!("Query execution failed: {}", e)))
+    }
 }
 
 /// Execute an RQL query with SSE progress streaming.
@@ -383,10 +537,50 @@ pub async fn execute_query_stream<R: ReasoningEngine + Clone + Send + Sync + 'st
     use reasondb_core::cache::{CachedMatch, CachedQueryResult};
     use std::time::Instant;
 
-    let query = Query::parse(&request.query)
+    let stmt = Statement::parse(&request.query)
         .map_err(|e| ApiError::BadRequest(format!("Invalid query: {}", e)))?;
 
     let (sse_tx, sse_rx) = mpsc::channel::<Event>(32);
+
+    // UPDATE/DELETE: execute and send a single complete event
+    match &stmt {
+        Statement::Update(uq) => {
+            let result = state
+                .store
+                .execute_update(uq)
+                .map_err(|e| ApiError::Internal(format!("Update failed: {}", e)))?;
+            let response: MutationResponse = result.into();
+            let event = Event::default()
+                .event("complete")
+                .json_data(&response)
+                .unwrap_or_else(|_| Event::default().event("complete").data("{}"));
+            let _ = sse_tx.send(event).await;
+            drop(sse_tx);
+            let stream = ReceiverStream::new(sse_rx).map(Ok::<_, Infallible>);
+            return Ok(Sse::new(stream));
+        }
+        Statement::Delete(dq) => {
+            let result = state
+                .store
+                .execute_delete(dq)
+                .map_err(|e| ApiError::Internal(format!("Delete failed: {}", e)))?;
+            let response: MutationResponse = result.into();
+            let event = Event::default()
+                .event("complete")
+                .json_data(&response)
+                .unwrap_or_else(|_| Event::default().event("complete").data("{}"));
+            let _ = sse_tx.send(event).await;
+            drop(sse_tx);
+            let stream = ReceiverStream::new(sse_rx).map(Ok::<_, Infallible>);
+            return Ok(Sse::new(stream));
+        }
+        Statement::Select(_) => {}
+    }
+
+    let query = match stmt {
+        Statement::Select(q) => q,
+        _ => unreachable!(),
+    };
 
     // Non-REASON queries: send a single complete event
     if query.reason.is_none() {
@@ -422,8 +616,14 @@ pub async fn execute_query_stream<R: ReasoningEngine + Clone + Send + Sync + 'st
                         reasoning_trace: vec![],
                     }
                 }).collect();
+                let mut doc = reasondb_core::Document::new(m.document_title.clone(), &m.table_id);
+                doc.id = m.document_id.clone();
+                doc.total_nodes = m.total_nodes;
+                doc.tags = m.tags.clone();
+                doc.metadata = m.metadata.clone();
+                doc.created_at = m.created_at;
                 DocumentMatch {
-                    document: reasondb_core::Document::new(m.document_title.clone(), &cached.table_id),
+                    document: doc,
                     score: Some(m.score),
                     matched_nodes,
                     highlights: m.highlights.clone(),
@@ -480,25 +680,32 @@ pub async fn execute_query_stream<R: ReasoningEngine + Clone + Send + Sync + 'st
                     }
                 });
 
-                let result = store
-                    .execute_rql_async_with_progress(
+                let result = std::panic::AssertUnwindSafe(
+                    store.execute_rql_async_with_progress(
                         &query_clone,
                         Some(text_index.as_ref()),
                         reasoner,
                         Some(progress_tx),
                     )
-                    .await;
+                )
+                .catch_unwind()
+                .await;
 
                 // Wait for forwarder to finish draining
                 let _ = forwarder.await;
 
                 match result {
-                    Ok(result) => {
+                    Ok(Ok(result)) => {
                         // Cache the result
                         let cached_matches: Vec<CachedMatch> = result.documents.iter().map(|m| {
                             CachedMatch {
                                 document_id: m.document.id.clone(),
                                 document_title: m.document.title.clone(),
+                                table_id: m.document.table_id.clone(),
+                                total_nodes: m.document.total_nodes,
+                                tags: m.document.tags.clone(),
+                                metadata: m.document.metadata.clone(),
+                                created_at: m.document.created_at,
                                 score: m.score.unwrap_or(0.0),
                                 confidence: m.confidence.unwrap_or(0.0),
                                 highlights: m.highlights.clone(),
@@ -531,10 +738,25 @@ pub async fn execute_query_stream<R: ReasoningEngine + Clone + Send + Sync + 'st
                             .unwrap_or_else(|_| Event::default().event("complete").data("{}"));
                         let _ = sse_tx_bg.send(event).await;
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
+                        tracing::error!("REASON query failed: {}", e);
                         let event = Event::default()
                             .event("error")
                             .data(format!("Query execution failed: {}", e));
+                        let _ = sse_tx_bg.send(event).await;
+                    }
+                    Err(panic_err) => {
+                        let msg = if let Some(s) = panic_err.downcast_ref::<String>() {
+                            s.clone()
+                        } else if let Some(s) = panic_err.downcast_ref::<&str>() {
+                            s.to_string()
+                        } else {
+                            "Unknown panic during query execution".to_string()
+                        };
+                        tracing::error!("REASON query panicked: {}", msg);
+                        let event = Event::default()
+                            .event("error")
+                            .data(format!("Internal error: {}", msg));
                         let _ = sse_tx_bg.send(event).await;
                     }
                 }
