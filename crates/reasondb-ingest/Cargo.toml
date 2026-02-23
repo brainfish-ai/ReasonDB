@@ -30,4 +30,4 @@ chrono.workspace = true
 
 # Text processing
 regex = "1.10"
-unicode-segmentation = "1.10"
+text-splitter = { version = "0.29", features = ["markdown"] }
