@@ -55,6 +55,9 @@ jobs:
         run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build
+        env:
+          RUSTC_WRAPPER: ""
+          CROSS_CONTAINER_OPTS: "--env RUSTC_WRAPPER="
         run: ${{ matrix.cross && 'cross' || 'cargo' }} build --release --target ${{ matrix.target }} -p reasondb-cli
 
       - name: Package (unix)
