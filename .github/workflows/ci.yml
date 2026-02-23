@@ -9,6 +9,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings
+  RUSTC_WRAPPER: ""
+  SCCACHE_GHA_ENABLED: "false"
 
 jobs:
   fmt:
@@ -31,6 +33,8 @@ jobs:
           components: clippy
       - uses: swatinem/rust-cache@v2
       - run: cargo clippy --workspace --exclude reasondb --all-targets -- -D warnings
+        env:
+          RUSTC_WRAPPER: ""
 
   test:
     name: Test
@@ -40,6 +44,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
       - run: cargo test --workspace --exclude reasondb
+        env:
+          RUSTC_WRAPPER: ""
 
   build:
     name: Build
@@ -49,3 +55,5 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
       - run: cargo build --workspace --exclude reasondb --release
+        env:
+          RUSTC_WRAPPER: ""
