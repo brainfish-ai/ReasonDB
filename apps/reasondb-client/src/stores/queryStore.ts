@@ -101,11 +101,14 @@ export const useQueryStore = create<QueryState>()(
 
       addToHistory: (item) =>
         set((state) => {
+          const dedupedHistory = state.history.filter(
+            (h) => h.query !== item.query || h.connectionId !== item.connectionId
+          )
           const newItem: QueryHistoryItem = {
             ...item,
             id: crypto.randomUUID(),
           }
-          const history = [newItem, ...state.history].slice(0, state.maxHistoryItems)
+          const history = [newItem, ...dedupedHistory].slice(0, state.maxHistoryItems)
           return { history }
         }),
 

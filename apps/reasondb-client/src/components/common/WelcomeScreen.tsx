@@ -1,8 +1,6 @@
 import {
   Database,
-  Plus,
   PlugsConnected,
-  Clock,
   BookOpen,
   Lightning,
   Brain,
@@ -12,11 +10,10 @@ import { cn } from '@/lib/utils'
 import { useConnectionStore } from '@/stores/connectionStore'
 
 interface WelcomeScreenProps {
-  onNewQuery: () => void
   onNewConnection: () => void
 }
 
-export function WelcomeScreen({ onNewQuery, onNewConnection }: WelcomeScreenProps) {
+export function WelcomeScreen({ onNewConnection }: WelcomeScreenProps) {
   const { connections, setActiveConnection } = useConnectionStore()
 
   const features = [
@@ -64,23 +61,6 @@ export function WelcomeScreen({ onNewQuery, onNewConnection }: WelcomeScreenProp
         <section aria-label="Quick actions">
           <div className="grid grid-cols-2 gap-4">
             <button
-              onClick={onNewQuery}
-              className={cn(
-                'flex items-center gap-3 p-4 rounded-lg',
-                'bg-surface-0 hover:bg-surface-1 border border-border',
-                'transition-all hover:border-mauve/50 group'
-              )}
-            >
-              <div className="p-2 rounded-lg bg-mauve/10 text-mauve group-hover:bg-mauve/20 transition-colors" aria-hidden="true">
-                <Plus size={20} weight="bold" />
-              </div>
-              <div className="text-left">
-                <div className="text-sm font-medium text-text">New Query</div>
-                <div className="text-xs text-subtext-0">Start writing RQL</div>
-              </div>
-            </button>
-
-            <button
               onClick={onNewConnection}
               className={cn(
                 'flex items-center gap-3 p-4 rounded-lg',
@@ -101,23 +81,10 @@ export function WelcomeScreen({ onNewQuery, onNewConnection }: WelcomeScreenProp
               </div>
             </button>
 
-            <button
-              className={cn(
-                'flex items-center gap-3 p-4 rounded-lg',
-                'bg-surface-0 hover:bg-surface-1 border border-border',
-                'transition-all hover:border-blue/50 group'
-              )}
-            >
-              <div className="p-2 rounded-lg bg-blue/10 text-blue group-hover:bg-blue/20 transition-colors" aria-hidden="true">
-                <Clock size={20} weight="bold" />
-              </div>
-              <div className="text-left">
-                <div className="text-sm font-medium text-text">Recent</div>
-                <div className="text-xs text-subtext-0">View query history</div>
-              </div>
-            </button>
-
-            <button
+            <a
+              href="https://docs.reasondb.dev"
+              target="_blank"
+              rel="noopener noreferrer"
               className={cn(
                 'flex items-center gap-3 p-4 rounded-lg',
                 'bg-surface-0 hover:bg-surface-1 border border-border',
@@ -131,7 +98,7 @@ export function WelcomeScreen({ onNewQuery, onNewConnection }: WelcomeScreenProp
                 <div className="text-sm font-medium text-text">Documentation</div>
                 <div className="text-xs text-subtext-0">Learn RQL syntax</div>
               </div>
-            </button>
+            </a>
           </div>
         </section>
 

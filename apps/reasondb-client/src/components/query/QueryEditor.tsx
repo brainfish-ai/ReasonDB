@@ -6,9 +6,11 @@ import { updateRqlTables } from '@/lib/rql-language'
 import { useQueryStore } from '@/stores/queryStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useTableStore } from '@/stores/tableStore'
+import { useUiStore } from '@/stores/uiStore'
 import { createClient } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { useMonacoEditor } from '@/providers/useMonacoHooks'
+import { SaveQueryDialog } from './SaveQueryDialog'
 
 interface QueryEditorProps {
   onExecute?: (query: string) => Promise<void>
@@ -23,9 +25,11 @@ export default function QueryEditor({ onExecute, tabId, initialQuery = '', onQue
   const query = currentQuery || initialQuery
   const { activeConnectionId, connections } = useConnectionStore()
   const { tables } = useTableStore()
+  const { setShowQueryHistory } = useUiStore()
   
   const activeConnection = connections.find((c) => c.id === activeConnectionId)
   const [warningDismissed, setWarningDismissed] = useState(false)
+  const [showSaveDialog, setShowSaveDialog] = useState(false)
 
   const handleContentChange = useCallback((value: string) => {
     setCurrentQuery(value)
@@ -401,6 +405,7 @@ export default function QueryEditor({ onExecute, tabId, initialQuery = '', onQue
             disabled={!query.trim()}
             className="gap-2"
             title="Save query"
+            onClick={() => setShowSaveDialog(true)}
           >
             <FloppyDisk size={16} />
             Save
@@ -411,6 +416,7 @@ export default function QueryEditor({ onExecute, tabId, initialQuery = '', onQue
             variant="ghost"
             className="gap-2"
             title="View query history"
+            onClick={() => setShowQueryHistory(true)}
           >
             <Clock size={16} />
             History
@@ -459,6 +465,8 @@ export default function QueryEditor({ onExecute, tabId, initialQuery = '', onQue
           </div>
         )}
       </div>
+
+      <SaveQueryDialog open={showSaveDialog} onOpenChange={setShowSaveDialog} />
     </div>
   )
 }
