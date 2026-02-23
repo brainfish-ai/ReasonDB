@@ -12,6 +12,9 @@ import {
 import { cn } from '@/lib/utils'
 import { WelcomeScreen } from '@/components/common/WelcomeScreen'
 import { QueryResults } from '@/components/query/QueryResults'
+import { QueryHistory } from '@/components/query/QueryHistory'
+import { SavedQueries } from '@/components/query/SavedQueries'
+import { SidePanel } from '@/components/ui/SidePanel'
 import { JsonViewer } from '@/components/shared/JsonViewer'
 import { useQueryStore } from '@/stores/queryStore'
 import { useTableStore } from '@/stores/tableStore'
@@ -46,9 +49,10 @@ export function MainPanel() {
       }
     : null
   const { selectedTableId, tables, selectTable } = useTableStore()
-  const { openConnectionForm } = useUiStore()
+  const { openConnectionForm, showQueryHistory, showSavedQueries, setShowQueryHistory, setShowSavedQueries } = useUiStore()
   const { activeConnectionId } = useConnectionStore()
   const { tabs, activeTabId, addTab, closeTab: closeTabStore, setActiveTab } = useTabsStore()
+  const { setCurrentQuery } = useQueryStore()
   const tabListRef = useRef<HTMLDivElement>(null)
 
   const addNewTab = () => {
@@ -96,6 +100,24 @@ export function MainPanel() {
     }
   }, [activeTabId, updateTabQuery])
 
+  const handleSelectQueryFromPanel = useCallback((query: string) => {
+    const queryTab = tabs.find((t) => t.id === activeTabId && t.type === 'query')
+    if (queryTab) {
+      setCurrentQuery(query)
+      updateTabQuery(queryTab.id, query)
+    } else {
+      const existingQueryTab = tabs.find((t) => t.type === 'query')
+      if (existingQueryTab) {
+        setActiveTab(existingQueryTab.id)
+        setCurrentQuery(query)
+        updateTabQuery(existingQueryTab.id, query)
+      } else {
+        addTab({ title: `Query ${tabs.length + 1}`, type: 'query', query })
+        setCurrentQuery(query)
+      }
+    }
+  }, [tabs, activeTabId, addTab, setActiveTab, setCurrentQuery, updateTabQuery])
+
   const handleTabKeyDown = (e: React.KeyboardEvent) => {
     const currentIndex = tabs.findIndex((t) => t.id === activeTabId)
     let nextIndex: number | null = null
@@ -120,12 +142,12 @@ export function MainPanel() {
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
 
-  if (tabs.length === 0 && !activeConnectionId) {
-    return <WelcomeScreen onNewQuery={addNewTab} onNewConnection={openConnectionForm} />
+  if (!activeConnectionId) {
+    return <WelcomeScreen onNewConnection={openConnectionForm} />
   }
 
   return (
-    <div className="h-full flex flex-col bg-base">
+    <div className="relative h-full flex flex-col bg-base">
       {/* Tab bar */}
       <div className="flex items-center bg-mantle border-b border-border min-h-[40px]">
         <div
@@ -354,6 +376,28 @@ export function MainPanel() {
           </Group>
         </div>
       )}
+
+      {/* Side panels for history and saved queries */}
+      <SidePanel
+        open={showQueryHistory}
+        onClose={() => setShowQueryHistory(false)}
+        title="Query History"
+      >
+        <QueryHistory
+          onSelectQuery={handleSelectQueryFromPanel}
+          onClose={() => setShowQueryHistory(false)}
+        />
+      </SidePanel>
+      <SidePanel
+        open={showSavedQueries}
+        onClose={() => setShowSavedQueries(false)}
+        title="Saved Queries"
+      >
+        <SavedQueries
+          onSelectQuery={handleSelectQueryFromPanel}
+          onClose={() => setShowSavedQueries(false)}
+        />
+      </SidePanel>
     </div>
   )
 }

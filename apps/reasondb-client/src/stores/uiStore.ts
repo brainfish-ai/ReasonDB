@@ -10,6 +10,8 @@ export interface UiState {
   resultsHeight: number
   activeTab: string | null
   showConnectionForm: boolean
+  showQueryHistory: boolean
+  showSavedQueries: boolean
 
   // Actions
   setTheme: (theme: Theme) => void
@@ -19,6 +21,8 @@ export interface UiState {
   setActiveTab: (tabId: string | null) => void
   setShowConnectionForm: (show: boolean) => void
   openConnectionForm: () => void
+  setShowQueryHistory: (show: boolean) => void
+  setShowSavedQueries: (show: boolean) => void
 }
 
 export const useUiStore = create<UiState>()(
@@ -30,6 +34,8 @@ export const useUiStore = create<UiState>()(
       resultsHeight: 300,
       activeTab: null,
       showConnectionForm: false,
+      showQueryHistory: false,
+      showSavedQueries: false,
 
       setTheme: (theme) => {
         set({ theme })
@@ -58,6 +64,9 @@ export const useUiStore = create<UiState>()(
       setShowConnectionForm: (showConnectionForm) => set({ showConnectionForm }),
       
       openConnectionForm: () => set({ showConnectionForm: true, sidebarOpen: true }),
+
+      setShowQueryHistory: (showQueryHistory) => set({ showQueryHistory, showSavedQueries: false }),
+      setShowSavedQueries: (showSavedQueries) => set({ showSavedQueries, showQueryHistory: false }),
     }),
     {
       name: 'reasondb-ui',

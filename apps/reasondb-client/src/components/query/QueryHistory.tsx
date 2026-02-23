@@ -15,9 +15,10 @@ import { cn } from '@/lib/utils'
 
 interface QueryHistoryProps {
   onSelectQuery?: (query: string) => void
+  onClose?: () => void
 }
 
-export function QueryHistory({ onSelectQuery }: QueryHistoryProps) {
+export function QueryHistory({ onSelectQuery, onClose }: QueryHistoryProps) {
   const { history, removeFromHistory, clearHistory, setCurrentQuery } = useQueryStore()
   const { connections } = useConnectionStore()
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -25,6 +26,7 @@ export function QueryHistory({ onSelectQuery }: QueryHistoryProps) {
   const handleSelectQuery = (item: QueryHistoryItem) => {
     setCurrentQuery(item.query)
     onSelectQuery?.(item.query)
+    onClose?.()
   }
 
   const getConnectionName = (connectionId: string) => {
@@ -69,7 +71,7 @@ export function QueryHistory({ onSelectQuery }: QueryHistoryProps) {
           <div
             key={item.id}
             className={cn(
-              'border-b border-border/50 hover:bg-surface-0/50 transition-colors'
+              'group border-b border-border/50 hover:bg-surface-0/50 transition-colors'
             )}
           >
             {/* Header row */}

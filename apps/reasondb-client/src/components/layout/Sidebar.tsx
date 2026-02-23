@@ -12,6 +12,7 @@ import { useConnectionStore, type Connection } from '@/stores/connectionStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useTabsStore } from '@/stores/tabsStore'
 import { useLlmHealthStore } from '@/stores/llmHealthStore'
+import { useQueryStore } from '@/stores/queryStore'
 import { ConnectionList } from '@/components/connection/ConnectionList'
 import { ConnectionForm } from '@/components/connection/ConnectionForm'
 import { TableBrowser } from '@/components/table/TableBrowser'
@@ -24,7 +25,8 @@ export function Sidebar() {
     setConnecting, 
     setConnectionError,
   } = useConnectionStore()
-  const { showConnectionForm, setShowConnectionForm } = useUiStore()
+  const { showConnectionForm, setShowConnectionForm, setShowQueryHistory, setShowSavedQueries } = useUiStore()
+  const { history, savedQueries } = useQueryStore()
   const [editingConnection, setEditingConnection] = useState<Connection | undefined>()
 
   const handleConnect = async (connection: Connection) => {
@@ -141,24 +143,36 @@ export function Sidebar() {
 
       {/* Quick actions */}
       <div className="border-t border-border p-3 space-y-1">
-        <button
-          className={cn(
-            'w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md',
-            'text-subtext-1 hover:text-text hover:bg-surface-0 transition-colors'
-          )}
-        >
-          <Clock size={16} weight="duotone" aria-hidden="true" />
-          Recent Queries
-        </button>
-        <button
-          className={cn(
-            'w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md',
-            'text-subtext-1 hover:text-text hover:bg-surface-0 transition-colors'
-          )}
-        >
-          <Star size={16} weight="duotone" aria-hidden="true" />
-          Saved Queries
-        </button>
+        {activeConnectionId && (
+          <>
+            <button
+              onClick={() => setShowQueryHistory(true)}
+              className={cn(
+                'w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md',
+                'text-subtext-1 hover:text-text hover:bg-surface-0 transition-colors'
+              )}
+            >
+              <Clock size={16} weight="duotone" aria-hidden="true" />
+              <span className="flex-1 text-left">Recent Queries</span>
+              {history.length > 0 && (
+                <span className="text-[10px] text-overlay-0">{history.length}</span>
+              )}
+            </button>
+            <button
+              onClick={() => setShowSavedQueries(true)}
+              className={cn(
+                'w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md',
+                'text-subtext-1 hover:text-text hover:bg-surface-0 transition-colors'
+              )}
+            >
+              <Star size={16} weight="duotone" aria-hidden="true" />
+              <span className="flex-1 text-left">Saved Queries</span>
+              {savedQueries.length > 0 && (
+                <span className="text-[10px] text-overlay-0">{savedQueries.length}</span>
+              )}
+            </button>
+          </>
+        )}
         {activeConnectionId && (
           <button
             onClick={openSettingsTab}
