@@ -5,7 +5,7 @@
 //! # Example
 //!
 //! ```rust
-//! use reasondb_core::model::DocumentRelation;
+//! use reasondb_core::model::{DocumentRelation, RelationType};
 //!
 //! // Create a reference relationship
 //! let relation = DocumentRelation::new(
