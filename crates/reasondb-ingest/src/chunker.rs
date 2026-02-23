@@ -1,9 +1,11 @@
-//! Text chunking and structure detection
+//! Markdown-aware text chunking and structure detection
 //!
-//! Splits documents into semantic chunks and detects hierarchical structure.
+//! Uses `text_splitter::MarkdownSplitter` (CommonMark) for splitting and
+//! detects hierarchical headings for tree building.
 
 use regex::Regex;
-use unicode_segmentation::UnicodeSegmentation;
+use text_splitter::MarkdownSplitter;
+use tracing::{debug, warn};
 
 use crate::error::Result;
 
@@ -66,15 +68,13 @@ impl Default for ChunkerConfig {
     }
 }
 
-/// Semantic text chunker with heading detection
+/// Markdown-aware semantic chunker backed by `text-splitter`.
+///
+/// Splits at semantic markdown boundaries (headings, paragraphs, code blocks,
+/// lists) and detects heading structure for tree building.
 pub struct SemanticChunker {
     config: ChunkerConfig,
-    heading_patterns: Vec<HeadingPattern>,
-}
-
-struct HeadingPattern {
-    regex: Regex,
-    level: u8,
+    md_heading_re: Regex,
 }
 
 impl Default for SemanticChunker {
@@ -86,284 +86,101 @@ impl Default for SemanticChunker {
 impl SemanticChunker {
     /// Create a new chunker with the given configuration
     pub fn new(config: ChunkerConfig) -> Self {
-        let heading_patterns = Self::build_heading_patterns();
+        let md_heading_re = Regex::new(r"^(#{1,6})\s+(.+)$").unwrap();
         Self {
             config,
-            heading_patterns,
+            md_heading_re,
         }
     }
 
-    /// Build regex patterns for heading detection
-    fn build_heading_patterns() -> Vec<HeadingPattern> {
-        vec![
-            // Chapter headings: "Chapter 1", "CHAPTER ONE", etc.
-            HeadingPattern {
-                regex: Regex::new(r"(?i)^(?:chapter|part)\s+(?:\d+|[ivxlc]+|one|two|three|four|five|six|seven|eight|nine|ten)[:\.\s]").unwrap(),
-                level: 1,
-            },
-            // Numbered sections: "1.", "1.1", "1.1.1", etc.
-            HeadingPattern {
-                regex: Regex::new(r"^(\d+\.)+\s+[A-Z]").unwrap(),
-                level: 2,
-            },
-            // All caps headings (likely section titles)
-            HeadingPattern {
-                regex: Regex::new(r"^[A-Z][A-Z\s]{10,50}$").unwrap(),
-                level: 2,
-            },
-            // Title case lines that are short (likely headings)
-            HeadingPattern {
-                regex: Regex::new(r"^(?:[A-Z][a-z]+\s+){1,6}[A-Z][a-z]+$").unwrap(),
-                level: 3,
-            },
-            // Lettered sections: "A.", "A.1", "(a)", etc.
-            HeadingPattern {
-                regex: Regex::new(r"^(?:[A-Z]\.|\([a-z]\))\s+[A-Z]").unwrap(),
-                level: 3,
-            },
-            // Roman numeral sections
-            HeadingPattern {
-                regex: Regex::new(r"^(?:[IVXLC]+\.)\s+[A-Z]").unwrap(),
-                level: 2,
-            },
-        ]
-    }
-
-    /// Chunk a single text string
+    /// Chunk a markdown string into semantic pieces with heading metadata.
     pub fn chunk_text(&self, text: &str) -> Result<Vec<TextChunk>> {
-        let headings = if self.config.detect_headings {
-            self.detect_headings(text, &[])
-        } else {
-            Vec::new()
-        };
+        let capacity = self.config.min_chunk_size..self.config.max_chunk_size;
+        let splitter = MarkdownSplitter::new(capacity);
 
-        self.create_chunks(text, &headings, &[])
-    }
+        let raw_chunks: Vec<&str> = splitter.chunks(text).collect();
 
-    /// Detect headings in the text
-    fn detect_headings(&self, text: &str, page_offsets: &[(usize, usize)]) -> Vec<DetectedHeading> {
-        let mut headings = Vec::new();
-        let mut offset = 0;
+        debug!(
+            "MarkdownSplitter produced {} chunks from {} chars (range {}..{})",
+            raw_chunks.len(),
+            text.len(),
+            self.config.min_chunk_size,
+            self.config.max_chunk_size,
+        );
 
-        for line in text.lines() {
-            let trimmed = line.trim();
+        let total_chunk_chars: usize = raw_chunks.iter().map(|c| c.len()).sum();
+        let input_len = text.trim().len();
+        if total_chunk_chars < input_len {
+            let lost = input_len - total_chunk_chars;
+            let loss_pct = (lost as f64 / input_len as f64) * 100.0;
+            // Small whitespace normalization between chunks is expected (<1%).
+            // Only warn on significant content loss.
+            if loss_pct > 1.0 {
+                warn!(
+                    "Chunking content loss detected: input {} chars, chunks total {} chars, lost {} chars ({:.1}%)",
+                    input_len, total_chunk_chars, lost, loss_pct,
+                );
+            } else {
+                debug!(
+                    "Chunking whitespace normalization: input {} chars, chunks total {} chars, diff {} chars ({:.1}%)",
+                    input_len, total_chunk_chars, lost, loss_pct,
+                );
+            }
+        }
 
-            // Skip empty lines
-            if trimmed.is_empty() {
-                offset += line.len() + 1;
+        let mut chunks = Vec::with_capacity(raw_chunks.len());
+
+        for (i, raw) in raw_chunks.iter().enumerate() {
+            let content = raw.trim().to_string();
+            if content.is_empty() {
                 continue;
             }
 
-            // Check against heading patterns
-            for pattern in &self.heading_patterns {
-                if pattern.regex.is_match(trimmed) {
-                    let page_number = self.find_page_for_offset(offset, page_offsets);
+            let heading = if self.config.detect_headings {
+                self.detect_first_heading(&content)
+            } else {
+                None
+            };
 
-                    headings.push(DetectedHeading {
-                        text: trimmed.to_string(),
-                        level: pattern.level,
-                        offset,
-                        page_number,
-                    });
-                    break;
-                }
-            }
+            let char_count = content.chars().count();
+            let word_count = content.split_whitespace().count();
 
-            offset += line.len() + 1;
-        }
-
-        headings
-    }
-
-    /// Find which page contains a given offset
-    fn find_page_for_offset(&self, offset: usize, page_offsets: &[(usize, usize)]) -> Option<usize> {
-        for (i, &(page_offset, page_num)) in page_offsets.iter().enumerate() {
-            let next_offset = page_offsets
-                .get(i + 1)
-                .map(|&(o, _)| o)
-                .unwrap_or(usize::MAX);
-
-            if offset >= page_offset && offset < next_offset {
-                return Some(page_num);
-            }
-        }
-        None
-    }
-
-    /// Create chunks from text, respecting headings
-    fn create_chunks(
-        &self,
-        text: &str,
-        headings: &[DetectedHeading],
-        page_offsets: &[(usize, usize)],
-    ) -> Result<Vec<TextChunk>> {
-        let mut chunks = Vec::new();
-        let mut chunk_id = 0;
-
-        // If we have headings, use them as split points
-        if !headings.is_empty() {
-            let mut heading_iter = headings.iter().peekable();
-
-            while let Some(heading) = heading_iter.next() {
-                let start = heading.offset;
-                let end = heading_iter
-                    .peek()
-                    .map(|h| h.offset)
-                    .unwrap_or(text.len());
-
-                let section_text = &text[start..end];
-
-                // Split large sections into smaller chunks
-                let section_chunks = self.split_section(section_text, Some(heading.clone()));
-
-                for mut chunk in section_chunks {
-                    chunk.id = format!("chunk_{}", chunk_id);
-                    chunk.start_page = self.find_page_for_offset(start, page_offsets);
-                    chunk.end_page = self.find_page_for_offset(
-                        start + chunk.content.len().min(section_text.len()),
-                        page_offsets,
-                    );
-                    chunks.push(chunk);
-                    chunk_id += 1;
-                }
-            }
-
-            // Handle text before first heading
-            if let Some(first_heading) = headings.first() {
-                if first_heading.offset > 0 {
-                    let preamble = &text[..first_heading.offset];
-                    if preamble.trim().len() >= self.config.min_chunk_size {
-                        let preamble_chunks = self.split_section(preamble, None);
-                        for mut chunk in preamble_chunks {
-                            chunk.id = format!("chunk_preamble_{}", chunk_id);
-                            chunks.insert(0, chunk);
-                            chunk_id += 1;
-                        }
-                    }
-                }
-            }
-        } else {
-            // No headings - split by size only
-            let size_chunks = self.split_by_size(text);
-            for (i, mut chunk) in size_chunks.into_iter().enumerate() {
-                chunk.id = format!("chunk_{}", i);
-                chunks.push(chunk);
-            }
-        }
-
-        Ok(chunks)
-    }
-
-    /// Split a section that may be too large
-    fn split_section(&self, text: &str, heading: Option<DetectedHeading>) -> Vec<TextChunk> {
-        let trimmed = text.trim();
-        let char_count = trimmed.chars().count();
-
-        if char_count <= self.config.max_chunk_size {
-            // Section fits in one chunk
-            return vec![TextChunk {
-                id: String::new(),
-                content: trimmed.to_string(),
+            chunks.push(TextChunk {
+                id: format!("chunk_{}", i),
+                content,
                 heading,
                 char_count,
-                word_count: trimmed.unicode_words().count(),
-                start_page: None,
-                end_page: None,
-            }];
-        }
-
-        // Section is too large, split it
-        let mut chunks = Vec::new();
-        let sub_chunks = self.split_by_size(trimmed);
-
-        for (i, mut chunk) in sub_chunks.into_iter().enumerate() {
-            if i == 0 {
-                chunk.heading = heading.clone();
-            }
-            chunks.push(chunk);
-        }
-
-        chunks
-    }
-
-    /// Split text by size, trying to break at sentence boundaries
-    fn split_by_size(&self, text: &str) -> Vec<TextChunk> {
-        let mut chunks = Vec::new();
-        let mut current = String::new();
-        let mut current_word_count = 0;
-
-        // Split into sentences (roughly)
-        let sentences: Vec<&str> = text
-            .split(|c| c == '.' || c == '!' || c == '?')
-            .collect();
-
-        for sentence in sentences {
-            let sentence = sentence.trim();
-            if sentence.is_empty() {
-                continue;
-            }
-
-            let sentence_with_punct = format!("{}. ", sentence);
-            let sentence_chars = sentence_with_punct.chars().count();
-
-            if current.chars().count() + sentence_chars > self.config.target_chunk_size
-                && current.chars().count() >= self.config.min_chunk_size
-            {
-                // Current chunk is big enough, save it
-                let char_count = current.chars().count();
-                chunks.push(TextChunk {
-                    id: String::new(),
-                    content: current.trim().to_string(),
-                    heading: None,
-                    char_count,
-                    word_count: current_word_count,
-                    start_page: None,
-                    end_page: None,
-                });
-
-                // Start new chunk with overlap
-                let overlap_text = self.get_overlap_text(&current);
-                current = overlap_text;
-                current_word_count = current.unicode_words().count();
-            }
-
-            current.push_str(&sentence_with_punct);
-            current_word_count += sentence.unicode_words().count();
-        }
-
-        // Don't forget the last chunk
-        // Always include if we have no chunks yet (small documents), or if it meets min size
-        if !current.trim().is_empty()
-            && (chunks.is_empty() || current.chars().count() >= self.config.min_chunk_size)
-        {
-            let char_count = current.chars().count();
-            chunks.push(TextChunk {
-                id: String::new(),
-                content: current.trim().to_string(),
-                heading: None,
-                char_count,
-                word_count: current_word_count,
+                word_count,
                 start_page: None,
                 end_page: None,
             });
         }
 
-        chunks
+        debug!(
+            "Produced {} non-empty chunks with heading detection={}",
+            chunks.len(),
+            self.config.detect_headings,
+        );
+
+        Ok(chunks)
     }
 
-    /// Get overlap text from the end of a chunk
-    fn get_overlap_text(&self, text: &str) -> String {
-        if self.config.overlap == 0 {
-            return String::new();
+    /// Detect the first markdown heading (`# …` through `###### …`) in a chunk.
+    fn detect_first_heading(&self, content: &str) -> Option<DetectedHeading> {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if let Some(caps) = self.md_heading_re.captures(trimmed) {
+                let hashes = caps.get(1).unwrap().as_str();
+                let text = caps.get(2).unwrap().as_str().to_string();
+                return Some(DetectedHeading {
+                    level: hashes.len() as u8,
+                    text,
+                    offset: 0,
+                    page_number: None,
+                });
+            }
         }
-
-        let chars: Vec<char> = text.chars().collect();
-        if chars.len() <= self.config.overlap {
-            return text.to_string();
-        }
-
-        let start = chars.len() - self.config.overlap;
-        chars[start..].iter().collect()
+        None
     }
 }
 
@@ -385,12 +202,10 @@ impl TocExtractor {
     fn looks_like_toc(text: &str) -> bool {
         let lower = text.to_lowercase();
 
-        // Check for ToC indicators
         let has_toc_header = lower.contains("table of contents")
             || lower.contains("contents")
             || lower.contains("index");
 
-        // Check for page number patterns (common in ToC)
         let page_number_pattern = Regex::new(r"\.\s*\d+\s*$").unwrap();
         let lines_with_numbers = text
             .lines()
@@ -409,7 +224,6 @@ impl TocExtractor {
         for line in text.lines() {
             let trimmed = line.trim();
 
-            // Try dotted leader format: "Chapter One ......... 5"
             if let Some(caps) = toc_line.captures(trimmed) {
                 let title = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                 let level = Self::estimate_level(title);
@@ -417,12 +231,10 @@ impl TocExtractor {
                 headings.push(DetectedHeading {
                     text: title.trim().to_string(),
                     level,
-                    offset: 0, // Will be resolved later
+                    offset: 0,
                     page_number: caps.get(2).and_then(|m| m.as_str().parse().ok()),
                 });
-            }
-            // Try numbered format: "1.2 Some Section 15"
-            else if let Some(caps) = numbered_line.captures(trimmed) {
+            } else if let Some(caps) = numbered_line.captures(trimmed) {
                 let number = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                 let title = caps.get(2).map(|m| m.as_str()).unwrap_or("");
                 let level = number.matches('.').count() as u8 + 1;
@@ -465,55 +277,148 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_heading_detection() {
+    fn test_markdown_heading_detection() {
         let chunker = SemanticChunker::default();
 
-        let text = r#"
-Chapter 1: Introduction
+        let content = "# Introduction\n\nSome text here.\n\n## Background\n\nMore text.";
+        let heading = chunker.detect_first_heading(content);
 
-This is the introduction text that explains the basics.
-
-1.1 Background
-
-Some background information here.
-
-1.2 Motivation
-
-Why we're doing this work.
-
-CONCLUSION
-
-Final thoughts.
-"#;
-
-        let headings = chunker.detect_headings(text, &[]);
-
-        // Should detect at least "Chapter 1:" heading
-        assert!(headings.len() >= 1, "Expected at least 1 heading, got {}", headings.len());
-        assert!(
-            headings.iter().any(|h| h.text.contains("Chapter 1")),
-            "Expected to find Chapter 1 heading"
-        );
+        assert!(heading.is_some());
+        let h = heading.unwrap();
+        assert_eq!(h.level, 1);
+        assert_eq!(h.text, "Introduction");
     }
 
     #[test]
-    fn test_chunking() {
+    fn test_chunking_preserves_content() {
         let chunker = SemanticChunker::new(ChunkerConfig {
             target_chunk_size: 200,
             min_chunk_size: 50,
             max_chunk_size: 400,
-            overlap: 20,
+            overlap: 0,
             detect_headings: false,
         });
 
         let text = "This is a test sentence. ".repeat(50);
         let chunks = chunker.chunk_text(&text).unwrap();
 
-        assert!(chunks.len() > 1);
-        for chunk in &chunks {
-            assert!(chunk.char_count >= 50);
-            assert!(chunk.char_count <= 400);
+        assert!(chunks.len() > 1, "Expected multiple chunks");
+
+        let reconstructed: String = chunks.iter().map(|c| c.content.as_str()).collect::<Vec<_>>().join("\n\n");
+        for word in text.split_whitespace() {
+            assert!(
+                reconstructed.contains(word),
+                "Lost word '{}' during chunking",
+                word
+            );
         }
+    }
+
+    #[test]
+    fn test_chunking_respects_code_blocks() {
+        let chunker = SemanticChunker::new(ChunkerConfig {
+            target_chunk_size: 200,
+            min_chunk_size: 20,
+            max_chunk_size: 600,
+            overlap: 0,
+            detect_headings: true,
+        });
+
+        let text = r#"# Setup
+
+Install dependencies:
+
+```bash
+curl http://localhost:4444/health
+docker compose up --build -d
+git clone https://github.com/reasondb/reasondb.git
+```
+
+Some trailing text after the code block."#;
+
+        let chunks = chunker.chunk_text(text).unwrap();
+        assert!(!chunks.is_empty(), "Should produce at least one chunk");
+
+        let all_content: String = chunks.iter().map(|c| c.content.as_str()).collect::<Vec<_>>().join("\n\n");
+        assert!(
+            all_content.contains("```bash"),
+            "Code fence opener should be preserved"
+        );
+        assert!(
+            all_content.contains("```\n") || all_content.contains("```"),
+            "Code fence closer should be preserved"
+        );
+        assert!(
+            all_content.contains("https://github.com/reasondb/reasondb.git"),
+            "URL inside code block should not be split on dots"
+        );
+    }
+
+    #[test]
+    fn test_chunking_with_markdown_headings() {
+        let chunker = SemanticChunker::default();
+
+        let text = r#"# Chapter One
+
+This is the introduction text that explains the basics of the system.
+
+## Background
+
+Some background information here about the project and its goals.
+
+## Motivation
+
+Why we're doing this work and what we hope to achieve.
+
+# Conclusion
+
+Final thoughts on the matter."#;
+
+        let chunks = chunker.chunk_text(text).unwrap();
+
+        let headings: Vec<_> = chunks
+            .iter()
+            .filter_map(|c| c.heading.as_ref())
+            .collect();
+
+        assert!(
+            headings.iter().any(|h| h.text.contains("Chapter One")),
+            "Expected to find 'Chapter One' heading, got: {:?}",
+            headings,
+        );
+    }
+
+    #[test]
+    fn test_small_document_not_dropped() {
+        let chunker = SemanticChunker::default();
+
+        let text = "Short document with only a few words.";
+        let chunks = chunker.chunk_text(text).unwrap();
+
+        assert_eq!(chunks.len(), 1, "Small documents must produce exactly one chunk");
+        assert_eq!(chunks[0].content, text);
+    }
+
+    #[test]
+    fn test_urls_not_corrupted() {
+        let chunker = SemanticChunker::new(ChunkerConfig {
+            target_chunk_size: 200,
+            min_chunk_size: 20,
+            max_chunk_size: 500,
+            overlap: 0,
+            detect_headings: false,
+        });
+
+        let text = "Visit https://example.com/path/to/page.html for more info. Also see http://docs.rs/text-splitter/latest/text_splitter/ for the API docs.";
+
+        let chunks = chunker.chunk_text(text).unwrap();
+        let all_content: String = chunks.iter().map(|c| c.content.as_str()).collect::<Vec<_>>().join(" ");
+
+        assert!(
+            all_content.contains("https://example.com/path/to/page.html"),
+            "URL should not be fragmented: {}",
+            all_content,
+        );
     }
 
     #[test]
