@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:?Usage: update-homebrew.sh <version> <checksums-dir>}"
-CHECKSUMS_DIR="${2:?Usage: update-homebrew.sh <version> <checksums-dir>}"
+VERSION="${1:?Usage: update-homebrew.sh <version> <artifacts-dir>}"
+ARTIFACTS_DIR="${2:?Usage: update-homebrew.sh <version> <artifacts-dir>}"
 
 sha_for() {
   local target="$1"
-  grep "reasondb-${VERSION}-${target}" "${CHECKSUMS_DIR}/checksums-sha256.txt" | awk '{print $1}'
+  sha256sum "${ARTIFACTS_DIR}/reasondb-${VERSION}-${target}.tar.gz" | awk '{print $1}'
 }
 
 SHA_AARCH64_MACOS=$(sha_for "aarch64-apple-darwin")
