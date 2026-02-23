@@ -94,7 +94,15 @@ export const useQueryStore = create<QueryState>()(
       setCurrentQuery: (query) => set({ currentQuery: query }),
       setIsExecuting: (isExecuting) => set({ isExecuting, executionStartedAt: isExecuting ? Date.now() : null }),
       setExecutionStartedAt: (ts) => set({ executionStartedAt: ts }),
-      setResults: (results) => set({ results, activeResultIndex: 0, error: null, reasonProgress: null }),
+      setResults: (results) => {
+        const MAX_ROWS_IN_MEMORY = 5000
+        const capped = results.map((r) =>
+          r.rows.length > MAX_ROWS_IN_MEMORY
+            ? { ...r, rows: r.rows.slice(0, MAX_ROWS_IN_MEMORY) }
+            : r
+        )
+        set({ results: capped, activeResultIndex: 0, error: null, reasonProgress: null })
+      },
       setActiveResultIndex: (index) => set({ activeResultIndex: index }),
       setError: (error) => set({ error, results: [], activeResultIndex: 0, reasonProgress: null }),
       setReasonProgress: (progress) => set({ reasonProgress: progress }),

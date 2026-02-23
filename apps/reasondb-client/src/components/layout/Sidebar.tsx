@@ -62,6 +62,8 @@ export function Sidebar() {
     if (activeConnectionId) {
       removeClient(activeConnectionId)
       setActiveConnection(null)
+      useQueryStore.getState().setResults([])
+      useQueryStore.getState().setError(null)
     }
   }
 
