@@ -296,12 +296,10 @@ async fn add_node(
 
     if output.is_json() {
         println!("{}", serde_json::to_string_pretty(&result)?);
+    } else if result.success {
+        println!("{} {}", "✓".green().bold(), result.message);
     } else {
-        if result.success {
-            println!("{} {}", "✓".green().bold(), result.message);
-        } else {
-            println!("{} {}", "✗".red().bold(), result.message);
-        }
+        println!("{} {}", "✗".red().bold(), result.message);
     }
 
     Ok(())
@@ -326,12 +324,10 @@ async fn remove_node(server: &str, node_id: &str, output: Output) -> anyhow::Res
 
     if output.is_json() {
         println!("{}", serde_json::to_string_pretty(&result)?);
+    } else if result.success {
+        println!("{} {}", "✓".green().bold(), result.message);
     } else {
-        if result.success {
-            println!("{} {}", "✓".green().bold(), result.message);
-        } else {
-            println!("{} {}", "✗".red().bold(), result.message);
-        }
+        println!("{} {}", "✗".red().bold(), result.message);
     }
 
     Ok(())
