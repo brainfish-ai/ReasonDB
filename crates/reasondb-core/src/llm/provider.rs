@@ -918,7 +918,7 @@ mod tests {
         assert!(matches!(claude, LLMProvider::Anthropic { .. }));
 
         let gemini = LLMProvider::gemini("test-key");
-        assert!(matches!(gemini, LLMProvider::Gemini { model, .. } if model == "gemini-1.5-flash"));
+        assert!(matches!(gemini, LLMProvider::Gemini { model, .. } if model == "gemini-2.5-flash"));
 
         let cohere = LLMProvider::cohere("test-key");
         assert!(matches!(cohere, LLMProvider::Cohere { model, .. } if model == "command-r-plus"));
