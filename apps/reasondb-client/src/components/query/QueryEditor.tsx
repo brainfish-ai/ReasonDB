@@ -179,6 +179,7 @@ export default function QueryEditor({ onExecute, tabId, initialQuery = '', onQue
 
     setIsExecuting(true)
     setError(null)
+    setResults([])
 
     try {
       if (onExecute) {
