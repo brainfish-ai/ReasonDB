@@ -613,22 +613,7 @@ pub async fn execute_query_stream<R: ReasoningEngine + Clone + Send + Sync + 'st
         _ => unreachable!(),
     };
 
-    // Non-REASON queries: send a single complete event
-    if query.reason.is_none() {
-        let result = state
-            .store
-            .execute_rql_with_search(&query, Some(state.text_index.as_ref()))
-            .map_err(|e| ApiError::Internal(format!("Query execution failed: {}", e)))?;
-        let response: QueryResponse = result.into();
-        let event = Event::default()
-            .event("complete")
-            .json_data(&response)
-            .unwrap_or_else(|_| Event::default().event("complete").data("{}"));
-        let _ = sse_tx.send(event).await;
-        drop(sse_tx);
-    } else {
-        let reason_clause = query.reason.as_ref().unwrap().clone();
-
+    if let Some(reason_clause) = query.reason.clone() {
         // Check cache first
         if let Some(cached) = state
             .query_cache
@@ -806,6 +791,19 @@ pub async fn execute_query_stream<R: ReasoningEngine + Clone + Send + Sync + 'st
             });
             drop(sse_tx);
         }
+    } else {
+        // Non-REASON queries: send a single complete event
+        let result = state
+            .store
+            .execute_rql_with_search(&query, Some(state.text_index.as_ref()))
+            .map_err(|e| ApiError::Internal(format!("Query execution failed: {}", e)))?;
+        let response: QueryResponse = result.into();
+        let event = Event::default()
+            .event("complete")
+            .json_data(&response)
+            .unwrap_or_else(|_| Event::default().event("complete").data("{}"));
+        let _ = sse_tx.send(event).await;
+        drop(sse_tx);
     }
 
     let stream = ReceiverStream::new(sse_rx).map(Ok::<_, Infallible>);
