@@ -101,6 +101,7 @@ ReasonDB solves this by letting the LLM **reason through** your documents - not 
 <h2>How It Works</h2>
 
 ```mermaid
+%%{init: {'theme': 'dark'}}%%
 flowchart TD
     subgraph Ingestion["Ingestion Pipeline (Plugin-Driven)"]
         A["Documents / URLs"] -->|Extractor Plugin| B["Markdown"]
