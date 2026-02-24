@@ -41,6 +41,10 @@
     <a href="https://reason-db.devdoc.sh/api-reference/introduction">API Reference</a>
 </p>
 
+<p align="center">
+    <sub>&#9888;&#65039; <strong>Alpha Release</strong> &mdash; ReasonDB is under active development. APIs and features may change. We'd love your <a href="https://github.com/reasondb/reasondb/issues">feedback</a>!</sub>
+</p>
+
 <br>
 
 <p align="center">
@@ -146,6 +150,26 @@ Grab the [latest release](https://github.com/reasondb/reasondb/releases/latest) 
 | **Windows** | x86_64 | [x86_64-pc-windows-msvc](https://github.com/reasondb/reasondb/releases/latest) |
 
 > **ReasonDB Client:** A desktop app is also available for [macOS (.dmg) and Windows (.msi)](https://github.com/reasondb/reasondb/releases/latest).
+
+<details>
+<summary><strong>macOS: "ReasonDB.app" Not Opened</strong></summary>
+
+<br>
+
+Since ReasonDB is in alpha, the desktop app is not yet signed with an Apple Developer certificate. macOS Gatekeeper will block it on first launch. To open it:
+
+1. **Right-click** (or Control-click) on `ReasonDB.app` and select **Open**
+2. Click **Open** in the confirmation dialog
+
+Or remove the quarantine attribute from the terminal:
+
+```bash
+xattr -cr /Applications/ReasonDB.app
+```
+
+You can also go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to the ReasonDB message.
+
+</details>
 
 #### Install with Homebrew (macOS / Linux)
 
