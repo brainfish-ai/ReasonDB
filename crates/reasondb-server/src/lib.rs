@@ -410,9 +410,9 @@ fn llm_settings_from_env() -> anyhow::Result<LlmSettings> {
         base_url: std::env::var("REASONDB_LLM_BASE_URL")
             .ok()
             .filter(|u| !u.is_empty()),
-        region: std::env::var("AWS_REGION").ok().or_else(|| {
-            std::env::var("REASONDB_LLM_REGION").ok()
-        }),
+        region: std::env::var("AWS_REGION")
+            .ok()
+            .or_else(|| std::env::var("REASONDB_LLM_REGION").ok()),
         options: LlmOptions::default(),
     };
 

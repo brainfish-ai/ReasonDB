@@ -330,7 +330,11 @@ mod tests {
         assert_eq!(config.provider, "vertex");
         assert_eq!(config.api_key.as_deref(), Some("test-token"));
         assert_eq!(config.model.as_deref(), Some("gemini-2.0-flash-001"));
-        assert!(config.base_url.as_deref().unwrap().contains("aiplatform.googleapis.com"));
+        assert!(config
+            .base_url
+            .as_deref()
+            .unwrap()
+            .contains("aiplatform.googleapis.com"));
 
         let back = config.to_provider().unwrap();
         assert_eq!(back.provider_name(), "vertex");
@@ -344,7 +348,10 @@ mod tests {
         assert_eq!(config.provider, "bedrock");
         assert!(config.api_key.is_none());
         assert_eq!(config.region.as_deref(), Some("us-east-1"));
-        assert_eq!(config.model.as_deref(), Some("anthropic.claude-3-sonnet-20240229-v1:0"));
+        assert_eq!(
+            config.model.as_deref(),
+            Some("anthropic.claude-3-sonnet-20240229-v1:0")
+        );
 
         // to_provider needs region (from config or AWS_REGION); set it in config
         let back = config.to_provider().unwrap();

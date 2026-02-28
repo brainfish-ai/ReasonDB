@@ -70,12 +70,11 @@ fn extract_bedrock_message_text(
     output: Option<&aws_sdk_bedrockruntime::types::ConverseOutput>,
 ) -> Result<String> {
     use aws_sdk_bedrockruntime::types::ContentBlock;
-    let output = output.ok_or_else(|| {
-        ReasonError::Reasoning("Bedrock returned no output".into())
-    })?;
-    let msg = output.as_message().map_err(|_| {
-        ReasonError::Reasoning("Bedrock output was not a message".into())
-    })?;
+    let output =
+        output.ok_or_else(|| ReasonError::Reasoning("Bedrock returned no output".into()))?;
+    let msg = output
+        .as_message()
+        .map_err(|_| ReasonError::Reasoning("Bedrock output was not a message".into()))?;
     let text: String = msg
         .content()
         .iter()
@@ -594,8 +593,7 @@ impl Reasoner {
                 api_key,
                 model,
             } => {
-                let client =
-                    rig::providers::openai::Client::from_url(api_key.as_str(), base_url);
+                let client = rig::providers::openai::Client::from_url(api_key.as_str(), base_url);
                 let mut builder = client.extractor::<T>(model);
                 if let Some(preamble) = &self.options.system_prompt {
                     builder = builder.preamble(preamble);
@@ -629,11 +627,14 @@ impl Reasoner {
                 );
                 let user_message = aws_sdk_bedrockruntime::types::Message::builder()
                     .role(aws_sdk_bedrockruntime::types::ConversationRole::User)
-                    .content(aws_sdk_bedrockruntime::types::ContentBlock::Text(extraction_prompt))
+                    .content(aws_sdk_bedrockruntime::types::ContentBlock::Text(
+                        extraction_prompt,
+                    ))
                     .build();
-                let inference_config = aws_sdk_bedrockruntime::types::InferenceConfiguration::builder()
-                    .max_tokens(self.effective_max_tokens(4096) as i32)
-                    .build();
+                let inference_config =
+                    aws_sdk_bedrockruntime::types::InferenceConfiguration::builder()
+                        .max_tokens(self.effective_max_tokens(4096) as i32)
+                        .build();
                 let response = client
                     .converse()
                     .model_id(model)
@@ -801,8 +802,7 @@ impl Reasoner {
                 api_key,
                 model,
             } => {
-                let client =
-                    rig::providers::openai::Client::from_url(api_key.as_str(), base_url);
+                let client = rig::providers::openai::Client::from_url(api_key.as_str(), base_url);
                 let agent = self.apply_agent_options(client.agent(model)).build();
 
                 agent
@@ -819,11 +819,14 @@ impl Reasoner {
                 let client = aws_sdk_bedrockruntime::Client::new(&config);
                 let user_message = aws_sdk_bedrockruntime::types::Message::builder()
                     .role(aws_sdk_bedrockruntime::types::ConversationRole::User)
-                    .content(aws_sdk_bedrockruntime::types::ContentBlock::Text(prompt.to_string()))
+                    .content(aws_sdk_bedrockruntime::types::ContentBlock::Text(
+                        prompt.to_string(),
+                    ))
                     .build();
-                let inference_config = aws_sdk_bedrockruntime::types::InferenceConfiguration::builder()
-                    .max_tokens(self.effective_max_tokens(4096) as i32)
-                    .build();
+                let inference_config =
+                    aws_sdk_bedrockruntime::types::InferenceConfiguration::builder()
+                        .max_tokens(self.effective_max_tokens(4096) as i32)
+                        .build();
                 let response = client
                     .converse()
                     .model_id(model)
@@ -1153,11 +1156,15 @@ mod tests {
             "token",
             "gemini-2.0-flash-001",
         );
-        assert!(matches!(vertex, LLMProvider::Vertex { ref model, .. } if model == "gemini-2.0-flash-001"));
+        assert!(
+            matches!(vertex, LLMProvider::Vertex { ref model, .. } if model == "gemini-2.0-flash-001")
+        );
         assert_eq!(vertex.provider_name(), "vertex");
 
         let bedrock = LLMProvider::bedrock("us-east-1", "anthropic.claude-3-sonnet-20240229-v1:0");
-        assert!(matches!(bedrock, LLMProvider::Bedrock { ref region, ref model, .. } if region == "us-east-1" && model == "anthropic.claude-3-sonnet-20240229-v1:0"));
+        assert!(
+            matches!(bedrock, LLMProvider::Bedrock { ref region, ref model, .. } if region == "us-east-1" && model == "anthropic.claude-3-sonnet-20240229-v1:0")
+        );
         assert_eq!(bedrock.provider_name(), "bedrock");
     }
 
