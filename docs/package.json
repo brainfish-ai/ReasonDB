@@ -7,6 +7,7 @@
     "build": "devdoc build",
     "start": "devdoc start",
     "check": "devdoc check",
+    "lint:api": "redocly lint api-reference/openapi.json",
     "deploy": "devdoc deploy",
     "ai": "devdoc ai",
     "whoami": "devdoc whoami",
@@ -14,5 +15,8 @@
   },
   "dependencies": {
     "@brainfish-ai/devdoc": "latest"
+  },
+  "devDependencies": {
+    "@redocly/cli": "latest"
   }
 }

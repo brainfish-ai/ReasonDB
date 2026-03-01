@@ -22,6 +22,7 @@ STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
 
 HAS_RUST=$(echo "$STAGED" | grep -E '\.rs$|Cargo\.toml$|Cargo\.lock$' | head -1 || true)
 HAS_DOCS=$(echo "$STAGED" | grep -E '^docs/' | head -1 || true)
+HAS_OPENAPI=$(echo "$STAGED" | grep -E '^docs/api-reference/openapi\.json$' | head -1 || true)
 
 echo -e "${BOLD}Running pre-commit checks...${RESET}"
 echo ""
@@ -60,6 +61,19 @@ if [[ -n "$HAS_DOCS" ]]; then
     fi
 else
     info "No docs files staged — skipping docs check"
+fi
+
+# ── OpenAPI schema lint ───────────────────────────────────────────────────────
+if [[ -n "$HAS_OPENAPI" ]]; then
+    info "Linting OpenAPI schema (redocly lint)..."
+    if (cd "$REPO_ROOT/docs" && npm run lint:api --silent 2>&1); then
+        pass "OpenAPI schema OK"
+    else
+        fail "OpenAPI schema invalid — fix errors above"
+        ERRORS=$((ERRORS + 1))
+    fi
+else
+    info "openapi.json not staged — skipping API schema lint"
 fi
 
 echo ""
