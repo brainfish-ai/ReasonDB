@@ -1537,7 +1537,11 @@
             "description": "Aggregate results (for COUNT/SUM/AVG queries)"
           },
           "explain": {
-            "$ref": "#/components/schemas/QueryPlan",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QueryPlan"
+              }
+            ],
             "description": "Query plan (for EXPLAIN queries)"
           }
         }
@@ -2044,4 +2048,3 @@
     {}
   ]
 }
- 
