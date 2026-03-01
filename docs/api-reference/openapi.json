@@ -51,7 +51,9 @@
         "summary": "Health check",
         "description": "Returns OK if the server is running.",
         "operationId": "healthCheck",
-        "tags": ["health"],
+        "tags": [
+          "health"
+        ],
         "responses": {
           "200": {
             "description": "Server is healthy",
@@ -72,7 +74,9 @@
         "summary": "Create a new table",
         "description": "Creates a new table (collection) to organize documents. Documents can be assigned to tables during ingestion or moved later.",
         "operationId": "createTable",
-        "tags": ["tables"],
+        "tags": [
+          "tables"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -120,7 +124,9 @@
         "summary": "List all tables",
         "description": "Returns a list of all tables in the database, including document counts.",
         "operationId": "listTables",
-        "tags": ["tables"],
+        "tags": [
+          "tables"
+        ],
         "responses": {
           "200": {
             "description": "List of tables",
@@ -150,7 +156,9 @@
         "summary": "Get table details",
         "description": "Returns detailed information about a specific table.",
         "operationId": "getTable",
-        "tags": ["tables"],
+        "tags": [
+          "tables"
+        ],
         "parameters": [
           {
             "name": "id",
@@ -200,7 +208,9 @@
         "summary": "Update a table",
         "description": "Update table metadata, name, or description. Only provided fields are updated.",
         "operationId": "updateTable",
-        "tags": ["tables"],
+        "tags": [
+          "tables"
+        ],
         "parameters": [
           {
             "name": "id",
@@ -260,7 +270,9 @@
         "summary": "Delete a table",
         "description": "Delete a table. By default, documents in the table are moved to the default table. Set `cascade=true` in the request body to delete all documents in the table.",
         "operationId": "deleteTable",
-        "tags": ["tables"],
+        "tags": [
+          "tables"
+        ],
         "parameters": [
           {
             "name": "id",
@@ -346,7 +358,9 @@
         "summary": "Get documents in a table",
         "description": "Returns all documents assigned to a specific table.",
         "operationId": "getTableDocuments",
-        "tags": ["tables"],
+        "tags": [
+          "tables"
+        ],
         "parameters": [
           {
             "name": "id",
@@ -393,175 +407,14 @@
         }
       }
     },
-    "/v1/ingest/text": {
-      "post": {
-        "summary": "Ingest raw text or markdown",
-        "description": "Ingest plain text or Markdown content directly. The content will be chunked, organized into a tree structure, and optionally summarized by an LLM. You must specify a table_id to assign the document to.",
-        "operationId": "ingestText",
-        "tags": ["ingestion"],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IngestTextRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Text ingested successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IngestResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Ingestion failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/ingest/file": {
-      "post": {
-        "summary": "Ingest a file (multipart upload)",
-        "description": "Upload a document file for ingestion. Supports PDF, Word, Excel, PowerPoint, images (with OCR), audio files (with transcription), HTML, and more via MarkItDown.",
-        "operationId": "ingestFile",
-        "tags": ["ingestion"],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "required": ["file", "table_id"],
-                "properties": {
-                  "file": {
-                    "type": "string",
-                    "format": "binary",
-                    "description": "File to ingest"
-                  },
-                  "table_id": {
-                    "type": "string",
-                    "description": "Table ID to assign the document to",
-                    "example": "tbl_legal"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "File ingested successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IngestResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Ingestion failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/ingest/url": {
-      "post": {
-        "summary": "Ingest from URL",
-        "description": "Ingest content from a URL. Supports web pages, YouTube videos (with transcription), and other online resources. The content will be extracted, chunked, and organized into a tree.",
-        "operationId": "ingestUrl",
-        "tags": ["ingestion"],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IngestUrlRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "URL content ingested successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IngestResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation failed (invalid URL)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Ingestion failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/search": {
       "post": {
         "summary": "Search with LLM-guided tree traversal",
         "description": "Performs an intelligent search across documents using an LLM to navigate the hierarchical tree structure. The LLM evaluates each node's summary to decide which branches to explore, mimicking human reasoning. Returns relevant content with extracted answers and confidence scores.",
         "operationId": "search",
-        "tags": ["search"],
+        "tags": [
+          "search"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -611,7 +464,9 @@
         "summary": "Execute an RQL query",
         "description": "Execute SQL-like queries against documents using ReasonDB Query Language (RQL).\n\nSupports:\n- `WHERE` clauses for filtering by tags, author, metadata\n- `SEARCH` clause for BM25 full-text search (fast keyword matching)\n- `REASON` clause for LLM semantic search (intelligent answer extraction)\n- `GROUP BY` and aggregate functions (COUNT, SUM, AVG)\n- `EXPLAIN` to view query execution plans",
         "operationId": "executeQuery",
-        "tags": ["query"],
+        "tags": [
+          "query"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -661,7 +516,9 @@
         "summary": "List all documents",
         "description": "Returns a summary of all ingested documents in the database.",
         "operationId": "listDocuments",
-        "tags": ["documents"],
+        "tags": [
+          "documents"
+        ],
         "responses": {
           "200": {
             "description": "List of documents",
@@ -694,7 +551,9 @@
         "summary": "Get document details",
         "description": "Returns full details for a specific document including metadata and tree info.",
         "operationId": "getDocument",
-        "tags": ["documents"],
+        "tags": [
+          "documents"
+        ],
         "parameters": [
           {
             "name": "id",
@@ -744,7 +603,9 @@
         "summary": "Delete a document",
         "description": "Deletes a document and all its associated nodes (cascade delete).",
         "operationId": "deleteDocument",
-        "tags": ["documents"],
+        "tags": [
+          "documents"
+        ],
         "parameters": [
           {
             "name": "id",
@@ -806,7 +667,9 @@
         "summary": "Get all nodes for a document",
         "description": "Returns a flat list of all nodes in the document tree.",
         "operationId": "getDocumentNodes",
-        "tags": ["documents"],
+        "tags": [
+          "documents"
+        ],
         "parameters": [
           {
             "name": "id",
@@ -861,7 +724,9 @@
         "summary": "Get document as tree structure",
         "description": "Returns the complete hierarchical tree structure with nested children. Useful for visualizing or navigating the document structure.",
         "operationId": "getDocumentTree",
-        "tags": ["documents"],
+        "tags": [
+          "documents"
+        ],
         "parameters": [
           {
             "name": "id",
@@ -907,13 +772,291 @@
           }
         }
       }
+    },
+    "/v1/tables/{table_name}/ingest/text": {
+      "post": {
+        "summary": "Ingest raw text or Markdown",
+        "description": "Enqueue plain text or Markdown content for background ingestion. The content will be chunked, organized into a tree structure, and optionally summarized by the LLM.\n\nReturns a `job_id`. Poll `GET /v1/jobs/{job_id}` for status and the resulting document ID.",
+        "operationId": "ingestTextForTable",
+        "tags": [
+          "ingestion"
+        ],
+        "parameters": [
+          {
+            "name": "table_name",
+            "in": "path",
+            "required": true,
+            "description": "Table name or slug",
+            "schema": {
+              "type": "string",
+              "example": "legal_contracts"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestTextBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Ingestion job queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Table not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tables/{table_name}/ingest/file": {
+      "post": {
+        "summary": "Ingest a file (multipart upload)",
+        "description": "Upload a document file for ingestion. Supports PDF, Word, Excel, PowerPoint, images (with OCR), audio files (with transcription), HTML, and more via MarkItDown.\n\nThe multipart body only needs the `file` field.",
+        "operationId": "ingestFileForTable",
+        "tags": [
+          "ingestion"
+        ],
+        "parameters": [
+          {
+            "name": "table_name",
+            "in": "path",
+            "required": true,
+            "description": "Table name or slug",
+            "schema": {
+              "type": "string",
+              "example": "legal_contracts"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "File to ingest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "File ingested successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Table not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Ingestion failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tables/{table_name}/ingest/url": {
+      "post": {
+        "summary": "Ingest from URL",
+        "description": "Enqueue content from a URL for background ingestion. Supports web pages, YouTube videos (with transcription), and other online resources.\n\nReturns a `job_id`. Poll `GET /v1/jobs/{job_id}` for status and the resulting document ID.",
+        "operationId": "ingestUrlForTable",
+        "tags": [
+          "ingestion"
+        ],
+        "parameters": [
+          {
+            "name": "table_name",
+            "in": "path",
+            "required": true,
+            "description": "Table name or slug",
+            "schema": {
+              "type": "string",
+              "example": "legal_contracts"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestUrlBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Ingestion job queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Table not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (invalid URL)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tables/{table_name}/ingest/batch": {
+      "post": {
+        "summary": "Batch ingest multiple documents",
+        "description": "Enqueue multiple text documents for background ingestion in a single request. Each item is processed as an individual document.\n\nReturns a `job_id`. Poll `GET /v1/jobs/{job_id}` for status.",
+        "operationId": "ingestBatchForTable",
+        "tags": [
+          "ingestion"
+        ],
+        "parameters": [
+          {
+            "name": "table_name",
+            "in": "path",
+            "required": true,
+            "description": "Table name or slug",
+            "schema": {
+              "type": "string",
+              "example": "legal_contracts"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchIngestBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Ingestion job queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Table not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
       "CreateTableRequest": {
         "type": "object",
-        "required": ["name"],
+        "required": [
+          "name"
+        ],
         "properties": {
           "name": {
             "type": "string",
@@ -1095,78 +1238,14 @@
             "type": "object",
             "description": "Custom metadata (author, etc.)",
             "additionalProperties": true,
-            "example": {"author": "Legal Team"}
+            "example": {
+              "author": "Legal Team"
+            }
           },
           "created_at": {
             "type": "string",
             "format": "date-time",
             "example": "2026-01-27T10:00:00Z"
-          }
-        }
-      },
-      "IngestTextRequest": {
-        "type": "object",
-        "required": ["title", "content", "table_id"],
-        "properties": {
-          "title": {
-            "type": "string",
-            "description": "Document title",
-            "example": "My Research Notes"
-          },
-          "content": {
-            "type": "string",
-            "description": "Document content (plain text or Markdown)",
-            "example": "# Introduction\n\nThis document covers..."
-          },
-          "table_id": {
-            "type": "string",
-            "description": "Table ID to assign the document to (REQUIRED - table must exist)",
-            "example": "tbl_legal"
-          },
-          "generate_summaries": {
-            "type": "boolean",
-            "description": "Whether to generate LLM summaries (default: true)",
-            "default": true
-          },
-          "tags": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Document tags for filtering",
-            "example": ["nda", "confidential"]
-          },
-          "metadata": {
-            "type": "object",
-            "description": "Custom metadata (author, contract_type, etc.)",
-            "additionalProperties": true,
-            "example": {
-              "author": "Legal Team",
-              "contract_type": "nda",
-              "value_usd": 50000
-            }
-          }
-        }
-      },
-      "IngestUrlRequest": {
-        "type": "object",
-        "required": ["url", "table_id"],
-        "properties": {
-          "url": {
-            "type": "string",
-            "format": "uri",
-            "description": "URL to ingest (web page, YouTube video, etc.)",
-            "example": "https://en.wikipedia.org/wiki/Machine_learning"
-          },
-          "table_id": {
-            "type": "string",
-            "description": "Table ID to assign the document to (REQUIRED - table must exist)",
-            "example": "tbl_research"
-          },
-          "generate_summaries": {
-            "type": "boolean",
-            "description": "Whether to generate LLM summaries (default: true)",
-            "default": true
           }
         }
       },
@@ -1230,7 +1309,9 @@
       },
       "SearchRequest": {
         "type": "object",
-        "required": ["query"],
+        "required": [
+          "query"
+        ],
         "properties": {
           "query": {
             "type": "string",
@@ -1253,7 +1334,10 @@
               "type": "string"
             },
             "description": "Filter by document tags (any match)",
-            "example": ["nda", "confidential"]
+            "example": [
+              "nda",
+              "confidential"
+            ]
           },
           "metadata": {
             "type": "object",
@@ -1387,7 +1471,9 @@
       },
       "QueryRequest": {
         "type": "object",
-        "required": ["query"],
+        "required": [
+          "query"
+        ],
         "properties": {
           "query": {
             "type": "string",
@@ -1742,6 +1828,177 @@
           },
           "details": {
             "description": "Additional error details (optional)"
+          }
+        }
+      },
+      "IngestTextBody": {
+        "type": "object",
+        "required": [
+          "title",
+          "content"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Document title",
+            "example": "My Research Notes"
+          },
+          "content": {
+            "type": "string",
+            "description": "Document content (plain text or Markdown)",
+            "example": "# Introduction\n\nThis document covers..."
+          },
+          "generate_summaries": {
+            "type": "boolean",
+            "description": "Whether to generate LLM summaries (default: true)",
+            "default": true
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Document tags for filtering",
+            "example": [
+              "nda",
+              "confidential"
+            ]
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Custom metadata (author, contract_type, etc.)",
+            "additionalProperties": true,
+            "example": {
+              "author": "Legal Team",
+              "contract_type": "nda",
+              "value_usd": 50000
+            }
+          }
+        }
+      },
+      "IngestUrlBody": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL to ingest (web page, YouTube video, etc.)",
+            "example": "https://en.wikipedia.org/wiki/Machine_learning"
+          },
+          "generate_summaries": {
+            "type": "boolean",
+            "description": "Whether to generate LLM summaries (default: true)",
+            "default": true
+          }
+        }
+      },
+      "BatchIngestItem": {
+        "type": "object",
+        "required": [
+          "title",
+          "content"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Document title",
+            "example": "My Research Notes"
+          },
+          "content": {
+            "type": "string",
+            "description": "Document content (plain text or Markdown)",
+            "example": "# Introduction\n\nThis document covers..."
+          },
+          "generate_summaries": {
+            "type": "boolean",
+            "description": "Whether to generate LLM summaries (default: true)",
+            "default": true
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Document tags for filtering",
+            "example": [
+              "research",
+              "ml"
+            ]
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Custom metadata",
+            "additionalProperties": true
+          }
+        }
+      },
+      "BatchIngestBody": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchIngestItem"
+            },
+            "description": "Documents to ingest",
+            "minItems": 1
+          }
+        }
+      },
+      "JobStatusResponse": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "Unique job ID",
+            "example": "job_abc123"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "processing",
+              "completed",
+              "failed"
+            ],
+            "description": "Current job status",
+            "example": "queued"
+          },
+          "progress": {
+            "type": "string",
+            "description": "Progress message (only present when status is 'processing')",
+            "example": "Building document tree..."
+          },
+          "result": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IngestResponse"
+              }
+            ],
+            "description": "Ingestion result (only present when status is 'completed')"
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message (only present when status is 'failed')",
+            "example": "Failed to parse document"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Job creation timestamp",
+            "example": "2024-01-15T10:30:00Z"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last status update timestamp",
+            "example": "2024-01-15T10:30:05Z"
           }
         }
       }

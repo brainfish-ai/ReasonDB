@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Pre-commit hook: formatting and linting checks
+# Install: make setup-hooks  (or: git config core.hooksPath .githooks)
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BOLD='\033[1m'
+RESET='\033[0m'
+
+pass() { echo -e "${GREEN}✓${RESET} $1"; }
+fail() { echo -e "${RED}✗${RESET} $1"; }
+info() { echo -e "${YELLOW}→${RESET} $1"; }
+
+ERRORS=0
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Detect which file types are staged
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+
+HAS_RUST=$(echo "$STAGED" | grep -E '\.rs$|Cargo\.toml$|Cargo\.lock$' | head -1 || true)
+HAS_DOCS=$(echo "$STAGED" | grep -E '^docs/' | head -1 || true)
+
+echo -e "${BOLD}Running pre-commit checks...${RESET}"
+echo ""
+
+# ── Rust checks ──────────────────────────────────────────────────────────────
+if [[ -n "$HAS_RUST" ]]; then
+    # 1. Formatting
+    info "Checking Rust formatting (cargo fmt)..."
+    if RUSTC_WRAPPER="" cargo fmt --all -- --check 2>&1; then
+        pass "Rust formatting OK"
+    else
+        fail "Rust formatting failed — run: cargo fmt --all"
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    # 2. Clippy lints
+    info "Running Clippy lints..."
+    if RUSTC_WRAPPER="" cargo clippy --workspace --all-targets -- -D warnings 2>&1; then
+        pass "Clippy OK"
+    else
+        fail "Clippy found issues — fix warnings above"
+        ERRORS=$((ERRORS + 1))
+    fi
+else
+    info "No Rust files staged — skipping Rust checks"
+fi
+
+# ── Docs checks ──────────────────────────────────────────────────────────────
+if [[ -n "$HAS_DOCS" ]]; then
+    info "Checking docs (devdoc check)..."
+    if (cd "$REPO_ROOT/docs" && npm run check --silent 2>&1); then
+        pass "Docs check OK"
+    else
+        fail "Docs check failed — fix issues above"
+        ERRORS=$((ERRORS + 1))
+    fi
+else
+    info "No docs files staged — skipping docs check"
+fi
+
+echo ""
+if [[ $ERRORS -eq 0 ]]; then
+    echo -e "${GREEN}${BOLD}All checks passed.${RESET}"
+else
+    echo -e "${RED}${BOLD}$ERRORS check(s) failed. Commit aborted.${RESET}"
+    echo -e "To bypass (not recommended): ${YELLOW}git commit --no-verify${RESET}"
+    exit 1
+fi
