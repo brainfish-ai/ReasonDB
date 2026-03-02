@@ -41,9 +41,8 @@ export function ConnectionBar({ serverUrl, apiKey, onServerUrlChange, onApiKeyCh
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 border-b bg-background/95 backdrop-blur">
       <div className="flex items-center gap-1.5 text-sm font-semibold text-foreground shrink-0">
-        <div className="w-6 h-6 rounded bg-primary flex items-center justify-center">
-          <span className="text-primary-foreground text-xs font-bold">R</span>
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo.svg" alt="ReasonDB" className="w-6 h-6 object-contain" />
         ReasonDB
       </div>
 
