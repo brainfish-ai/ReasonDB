@@ -18,6 +18,9 @@ const EXAMPLES: ExampleQuery[] = [
   { label: "REASON evolution", badge: "LLM", query: "SELECT * FROM papers ORDER BY metadata.year ASC REASON 'How has the approach to language model training evolved from 2017 to 2020?'" },
   { label: "REASON architecture", badge: "LLM", query: "SELECT * FROM papers REASON 'What architectural innovations do these papers introduce and how do they relate to each other?'" },
   { label: "Count papers", badge: "AGG", query: "SELECT COUNT(*) FROM papers" },
+  { label: "REASON benchmarks", badge: "LLM", query: "SELECT * FROM papers REASON 'What datasets and benchmarks were used to evaluate these models, and what were the headline results?'" },
+  { label: "REASON compute & scale", badge: "LLM", query: "SELECT * FROM papers REASON 'What computational requirements and scaling challenges do the authors describe, and how does model size affect performance?'" },
+  { label: "REASON limitations", badge: "LLM", query: "SELECT * FROM papers REASON 'What limitations, failure modes, and future research directions do the authors identify in each paper?'" },
 ]
 
 const STEPS = [
@@ -27,6 +30,9 @@ const STEPS = [
   { num: 4, title: "REASON — Evolution", badge: "LLM", desc: "Ask how LM training evolved across papers, ordered by year.", exIdx: 4 },
   { num: 5, title: "REASON — Architecture", badge: "LLM", desc: "Synthesize architectural innovations across all three papers.", exIdx: 5 },
   { num: 6, title: "Count Docs", badge: "AGG", desc: "Verify all 3 PDF papers were ingested successfully.", exIdx: 6 },
+  { num: 7, title: "REASON — Benchmarks", badge: "LLM", desc: "Explore what datasets and benchmarks each paper uses and what results were achieved.", exIdx: 7 },
+  { num: 8, title: "REASON — Compute & Scale", badge: "LLM", desc: "Understand the computational requirements and scaling laws discussed across papers.", exIdx: 8 },
+  { num: 9, title: "REASON — Limitations", badge: "LLM", desc: "Identify failure modes and future research directions flagged by each set of authors.", exIdx: 9 },
 ]
 
 const BADGE_COLORS: Record<string, string> = {
@@ -41,6 +47,7 @@ export default function Page() {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeStep, setActiveStep] = useState<number | null>(null)
+  const [playgroundIdx, setPlaygroundIdx] = useState(0)
 
   useEffect(() => {
     const url = localStorage.getItem("reasondb_server_url")
@@ -79,7 +86,7 @@ export default function Page() {
             <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide px-1 mb-2">Query Steps</p>
             {STEPS.map((step) => (
               <div key={step.num} className={`rounded-md border p-3 space-y-1.5 cursor-pointer transition-colors ${activeStep === step.num ? "border-purple-200 bg-purple-50" : "hover:bg-muted/40"}`}
-                onClick={() => { setActiveStep(step.num); setResult(null); setError(null) }}>
+                onClick={() => { setActiveStep(step.num); setPlaygroundIdx(step.exIdx); setResult(null); setError(null) }}>
                 <div className="flex items-center gap-2">
                   <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">{step.num}</span>
                   <span className="text-xs font-medium flex-1">{step.title}</span>
@@ -101,7 +108,7 @@ export default function Page() {
             <p className="text-xs text-muted-foreground">Query across 3 ML research papers ingested from PDF via <code className="bg-muted px-1 rounded text-[11px]">ingest/file</code>.</p>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            <QueryPlayground serverUrl={serverUrl} apiKey={apiKey} examples={EXAMPLES} onResult={setResult} onError={setError} isDataReady={isDataReady} />
+            <QueryPlayground serverUrl={serverUrl} apiKey={apiKey} examples={EXAMPLES} onResult={setResult} onError={setError} isDataReady={isDataReady} selectedIdx={playgroundIdx} />
             <Separator />
             <div><h3 className="text-sm font-semibold mb-3">Results</h3><ResultsDisplay result={result} error={error} /></div>
           </div>

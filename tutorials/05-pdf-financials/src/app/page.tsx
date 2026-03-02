@@ -18,6 +18,9 @@ const EXAMPLES: ExampleQuery[] = [
   { label: "REASON revenue", badge: "LLM", query: "SELECT * FROM financials REASON 'Compare revenue growth and profitability trends across Apple, Tesla, and Microsoft in FY2023'" },
   { label: "REASON AI strategy", badge: "LLM", query: "SELECT * FROM financials REASON 'How does each company describe their AI and machine learning strategy in their annual report?'" },
   { label: "REASON risks", badge: "LLM", query: "SELECT * FROM financials REASON 'What are the most significant risk factors common to all three companies?'" },
+  { label: "REASON competition", badge: "LLM", query: "SELECT * FROM financials REASON 'How do Apple, Tesla, and Microsoft describe their competitive landscape and what strategies do they use to maintain their advantages?'" },
+  { label: "REASON cybersecurity", badge: "LLM", query: "SELECT * FROM financials REASON 'How do these companies approach data privacy, cybersecurity risks, and regulatory compliance across their operations?'" },
+  { label: "REASON global growth", badge: "LLM", query: "SELECT * FROM financials REASON 'Which international markets and geographic expansion strategies do Apple, Tesla, and Microsoft prioritize for future growth?'" },
 ]
 
 const STEPS = [
@@ -27,6 +30,9 @@ const STEPS = [
   { num: 4, title: "REASON — Financials", badge: "LLM", desc: "Compare revenue growth and profitability across all 3 companies.", exIdx: 4 },
   { num: 5, title: "REASON — AI Strategy", badge: "LLM", desc: "Extract and compare each company's AI/ML strategy from their 10-K.", exIdx: 5 },
   { num: 6, title: "REASON — Risk Analysis", badge: "LLM", desc: "Identify common risk factors across Apple, Tesla, and Microsoft.", exIdx: 6 },
+  { num: 7, title: "REASON — Competition", badge: "LLM", desc: "Explore how each company describes its competitive landscape and defensive strategies.", exIdx: 7 },
+  { num: 8, title: "REASON — Cybersecurity", badge: "LLM", desc: "Understand how each company manages data privacy and cybersecurity risk.", exIdx: 8 },
+  { num: 9, title: "REASON — Global Growth", badge: "LLM", desc: "Discover which international markets each company targets for expansion.", exIdx: 9 },
 ]
 
 const BADGE_COLORS: Record<string, string> = {
@@ -41,6 +47,7 @@ export default function Page() {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeStep, setActiveStep] = useState<number | null>(null)
+  const [playgroundIdx, setPlaygroundIdx] = useState(0)
 
   useEffect(() => {
     const url = localStorage.getItem("reasondb_server_url")
@@ -79,7 +86,7 @@ export default function Page() {
             <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide px-1 mb-2">Query Steps</p>
             {STEPS.map((step) => (
               <div key={step.num} className={`rounded-md border p-3 space-y-1.5 cursor-pointer transition-colors ${activeStep === step.num ? "border-teal-200 bg-teal-50" : "hover:bg-muted/40"}`}
-                onClick={() => { setActiveStep(step.num); setResult(null); setError(null) }}>
+                onClick={() => { setActiveStep(step.num); setPlaygroundIdx(step.exIdx); setResult(null); setError(null) }}>
                 <div className="flex items-center gap-2">
                   <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">{step.num}</span>
                   <span className="text-xs font-medium flex-1">{step.title}</span>
@@ -101,7 +108,7 @@ export default function Page() {
             <p className="text-xs text-muted-foreground">Query across Apple, Tesla, and Microsoft FY2023 10-K filings.</p>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            <QueryPlayground serverUrl={serverUrl} apiKey={apiKey} examples={EXAMPLES} onResult={setResult} onError={setError} isDataReady={isDataReady} />
+            <QueryPlayground serverUrl={serverUrl} apiKey={apiKey} examples={EXAMPLES} onResult={setResult} onError={setError} isDataReady={isDataReady} selectedIdx={playgroundIdx} />
             <Separator />
             <div><h3 className="text-sm font-semibold mb-3">Results</h3><ResultsDisplay result={result} error={error} /></div>
           </div>

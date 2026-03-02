@@ -1,0 +1,29 @@
+{
+  "name": "@reasondb/rql-editor",
+  "version": "0.1.0",
+  "description": "Shared Monaco Editor RQL language definition and theme for ReasonDB",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch"
+  },
+  "peerDependencies": {
+    "monaco-editor": ">=0.40.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.3",
+    "monaco-editor": "^0.55.0",
+    "@monaco-editor/react": "^4.7.0"
+  }
+}

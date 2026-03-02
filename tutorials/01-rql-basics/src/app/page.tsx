@@ -15,9 +15,12 @@ const EXAMPLES: ExampleQuery[] = [
   { label: "WHERE filter", badge: "SQL", query: "SELECT title, metadata.author FROM books WHERE metadata.author = 'Jane Austen'" },
   { label: "LIKE pattern", badge: "SQL", query: "SELECT * FROM books WHERE title LIKE '%whale%'" },
   { label: "SEARCH (BM25)", badge: "BM25", query: "SELECT * FROM books SEARCH 'revenge obsession monster darkness'" },
-  { label: "REASON (LLM)", badge: "LLM", query: "SELECT * FROM books REASON 'What moral lessons about human nature appear across these novels?'" },
+  { label: "REASON — morals", badge: "LLM", query: "SELECT * FROM books REASON 'What moral lessons about human nature appear across these novels?'" },
   { label: "COUNT", badge: "AGG", query: "SELECT COUNT(*) FROM books" },
   { label: "ORDER BY", badge: "SQL", query: "SELECT title, metadata.author FROM books ORDER BY title ASC LIMIT 5" },
+  { label: "REASON — villains", badge: "LLM", query: "SELECT * FROM books REASON 'Who are the most compelling antagonists or villains in these novels and what makes them memorable?'" },
+  { label: "REASON — society", badge: "LLM", query: "SELECT * FROM books REASON 'How do these 19th-century novels reflect the social anxieties and cultural values of their era?'" },
+  { label: "REASON — narrative", badge: "LLM", query: "SELECT * FROM books REASON 'Compare the narrative voices and storytelling techniques across these five novels — what makes each author unique?'" },
 ]
 
 const STEPS = [
@@ -37,7 +40,7 @@ const STEPS = [
     exIdx: 3,
   },
   {
-    num: 4, title: "REASON — LLM", badge: "LLM",
+    num: 4, title: "REASON — Moral Lessons", badge: "LLM",
     desc: "Ask a natural language question. ReasonDB traverses the document tree with an LLM.",
     exIdx: 4,
   },
@@ -50,6 +53,21 @@ const STEPS = [
     num: 6, title: "ORDER + LIMIT", badge: "SQL",
     desc: "Sort results by any column and paginate with LIMIT / OFFSET.",
     exIdx: 6,
+  },
+  {
+    num: 7, title: "REASON — Antagonists", badge: "LLM",
+    desc: "Ask the LLM to identify and compare villains and antagonists across all novels.",
+    exIdx: 7,
+  },
+  {
+    num: 8, title: "REASON — Society & Era", badge: "LLM",
+    desc: "Explore how 19th-century social anxieties and cultural values shaped each novel.",
+    exIdx: 8,
+  },
+  {
+    num: 9, title: "REASON — Narrative Style", badge: "LLM",
+    desc: "Compare the distinct narrative voices and storytelling techniques of each author.",
+    exIdx: 9,
   },
 ]
 
@@ -184,6 +202,7 @@ export default function Page() {
               onResult={setResult}
               onError={setError}
               isDataReady={isDataReady}
+              selectedIdx={playgroundIdx}
             />
 
             <Separator />

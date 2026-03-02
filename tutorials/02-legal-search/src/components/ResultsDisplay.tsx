@@ -1,10 +1,15 @@
 "use client"
 import { Clock, Rows, Copy, Check } from "lucide-react"
-import { useState } from "react"
+import { useState, useMemo } from "react"
+import dynamic from "next/dynamic"
+import type { Monaco } from "@monaco-editor/react"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import type { QueryResult } from "@/lib/api"
+import { ensureTheme, THEME_NAME } from "@reasondb/rql-editor"
+
+const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false })
 
 interface Props {
   result: QueryResult | null
@@ -14,9 +19,20 @@ interface Props {
 export function ResultsDisplay({ result, error }: Props) {
   const [copied, setCopied] = useState(false)
 
+  const jsonString = useMemo(
+    () => (result ? JSON.stringify(result.rows, null, 2) : "[]"),
+    [result]
+  )
+
+  // Auto-size the editor height: ~20px per line, capped between 160px and 480px
+  const editorHeight = useMemo(() => {
+    const lines = jsonString.split("\n").length
+    return Math.min(Math.max(lines * 20, 160), 480)
+  }, [jsonString])
+
   const copy = () => {
     if (!result) return
-    navigator.clipboard.writeText(JSON.stringify(result.rows, null, 2))
+    navigator.clipboard.writeText(jsonString)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
@@ -41,8 +57,14 @@ export function ResultsDisplay({ result, error }: Props) {
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-4 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1"><Rows className="h-3.5 w-3.5" /> {result.rowCount} row{result.rowCount !== 1 ? "s" : ""}</span>
-        <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {result.executionTimeMs}ms</span>
+        <span className="flex items-center gap-1">
+          <Rows className="h-3.5 w-3.5" />
+          {result.rowCount} row{result.rowCount !== 1 ? "s" : ""}
+        </span>
+        <span className="flex items-center gap-1">
+          <Clock className="h-3.5 w-3.5" />
+          {result.executionTimeMs}ms
+        </span>
         <Button variant="ghost" size="sm" className="h-6 px-2 text-xs ml-auto gap-1" onClick={copy}>
           {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
           {copied ? "Copied" : "Copy JSON"}
@@ -57,14 +79,19 @@ export function ResultsDisplay({ result, error }: Props) {
 
         <TabsContent value="table">
           {result.rows.length === 0 ? (
-            <div className="rounded-md border p-6 text-center text-sm text-muted-foreground">No rows returned</div>
+            <div className="rounded-md border p-6 text-center text-sm text-muted-foreground">
+              No rows returned
+            </div>
           ) : (
             <ScrollArea className="h-80 rounded-md border">
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-muted/80 backdrop-blur">
                   <tr>
                     {result.columns.map((col) => (
-                      <th key={col} className="text-left px-3 py-2 font-medium text-muted-foreground whitespace-nowrap border-b">
+                      <th
+                        key={col}
+                        className="text-left px-3 py-2 font-medium text-muted-foreground whitespace-nowrap border-b"
+                      >
                         {col}
                       </th>
                     ))}
@@ -76,10 +103,15 @@ export function ResultsDisplay({ result, error }: Props) {
                       {result.columns.map((col) => {
                         const val = row[col]
                         const display =
-                          val === null || val === undefined ? <span className="text-muted-foreground/50">null</span>
-                          : typeof val === "object" ? <span className="text-blue-600">{JSON.stringify(val).slice(0, 80)}</span>
-                          : String(val).length > 120 ? String(val).slice(0, 120) + "…"
-                          : String(val)
+                          val === null || val === undefined ? (
+                            <span className="text-muted-foreground/50">null</span>
+                          ) : typeof val === "object" ? (
+                            <span className="text-blue-600">{JSON.stringify(val).slice(0, 80)}</span>
+                          ) : String(val).length > 120 ? (
+                            String(val).slice(0, 120) + "…"
+                          ) : (
+                            String(val)
+                          )
                         return (
                           <td key={col} className="px-3 py-2 max-w-xs truncate align-top">
                             {display}
@@ -95,11 +127,39 @@ export function ResultsDisplay({ result, error }: Props) {
         </TabsContent>
 
         <TabsContent value="json">
-          <ScrollArea className="h-80 rounded-md border bg-slate-950">
-            <pre className="p-4 text-xs text-slate-300 font-mono">
-              {JSON.stringify(result.rows, null, 2)}
-            </pre>
-          </ScrollArea>
+          <div className="rounded-md overflow-hidden border border-slate-700">
+            <MonacoEditor
+              height={editorHeight}
+              language="json"
+              theme={THEME_NAME}
+              onMount={(_, monaco: Monaco) => ensureTheme(monaco)}
+              value={jsonString}
+              options={{
+                readOnly: true,
+                minimap: { enabled: false },
+                fontSize: 12,
+                lineNumbers: "on",
+                wordWrap: "off",
+                scrollBeyondLastLine: false,
+                folding: true,
+                foldingHighlight: true,
+                padding: { top: 8, bottom: 8 },
+                overviewRulerLanes: 0,
+                hideCursorInOverviewRuler: true,
+                scrollbar: {
+                  vertical: "auto",
+                  horizontal: "auto",
+                  verticalScrollbarSize: 6,
+                  horizontalScrollbarSize: 6,
+                },
+                renderLineHighlight: "none",
+                contextmenu: false,
+                glyphMargin: false,
+                lineDecorationsWidth: 4,
+                lineNumbersMinChars: 3,
+              }}
+            />
+          </div>
         </TabsContent>
       </Tabs>
     </div>

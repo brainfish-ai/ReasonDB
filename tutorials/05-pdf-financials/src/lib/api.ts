@@ -64,12 +64,16 @@ export class ReasonDBClient {
 
   async getTableDocCount(tableName: string): Promise<number> {
     try {
-      const res = await fetch(`${this.baseUrl}/v1/tables/${encodeURIComponent(tableName)}`, {
+      // /v1/tables/:id requires a UUID; use the list endpoint and match by name instead
+      const res = await fetch(`${this.baseUrl}/v1/tables`, {
         headers: this.headers,
+        signal: AbortSignal.timeout(5000),
       })
       if (!res.ok) return 0
       const data = await res.json()
-      return data.document_count ?? 0
+      const table = (data.tables as Array<{ name: string; document_count: number }>)
+        ?.find((t) => t.name === tableName)
+      return table?.document_count ?? 0
     } catch {
       return 0
     }

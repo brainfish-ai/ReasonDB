@@ -1,5 +1,5 @@
 "use client"
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Database, CheckCircle2, Loader2, AlertCircle, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -34,20 +34,23 @@ export function DataSetupPanel({
   const [error, setError] = useState<string>()
   const [loadedCount, setLoadedCount] = useState(0)
 
-  const checkExisting = useCallback(async () => {
+  // Keep onReady in a ref so it never triggers effect re-runs
+  const onReadyRef = useRef(onReady)
+  useEffect(() => { onReadyRef.current = onReady })
+
+  // Check whether the table already has data — runs once on mount and when
+  // connection settings change. Does NOT depend on onReady to avoid loops.
+  useEffect(() => {
     if (!serverUrl) return
     const client = new ReasonDBClient(serverUrl, apiKey || undefined)
-    const count = await client.getTableDocCount(tableName)
-    if (count > 0) {
-      setLoadedCount(count)
-      setPhase("done")
-      onReady?.(count)
-    }
-  }, [serverUrl, apiKey, tableName, onReady])
-
-  useEffect(() => {
-    checkExisting()
-  }, [checkExisting])
+    client.getTableDocCount(tableName).then((count) => {
+      if (count > 0) {
+        setLoadedCount(count)
+        setPhase("done")
+        onReadyRef.current?.(count)
+      }
+    })
+  }, [serverUrl, apiKey, tableName])
 
   const pollJobs = useCallback(
     async (jobIds: string[], total: number) => {
@@ -98,11 +101,19 @@ export function DataSetupPanel({
       setPhase("done")
       setProgress(100)
       setStatusText("")
-      onReady?.(finalCount)
+      onReadyRef.current?.(finalCount)
     } catch (e) {
       setPhase("error")
       setError(e instanceof Error ? e.message : "Setup failed")
     }
+  }
+
+  const handleReinit = () => {
+    setPhase("idle")
+    setLoadedCount(0)
+    setProgress(0)
+    setStatusText("")
+    setError(undefined)
   }
 
   return (
@@ -122,7 +133,7 @@ export function DataSetupPanel({
           <span className="text-xs text-emerald-600 font-medium">
             {loadedCount} document{loadedCount !== 1 ? "s" : ""} ready in <code className="bg-muted px-1 rounded">{tableName}</code>
           </span>
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={() => { setPhase("idle"); setLoadedCount(0) }}>
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={handleReinit}>
             <RefreshCw className="h-3 w-3" /> Reinitialize
           </Button>
         </div>

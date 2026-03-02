@@ -18,6 +18,9 @@ const EXAMPLES: ExampleQuery[] = [
   { label: "REASON liability", badge: "LLM", query: "SELECT * FROM regulations REASON 'What are the key AI safety and liability requirements mentioned across these regulations?'" },
   { label: "REASON compliance", badge: "LLM", query: "SELECT * FROM regulations REASON 'What steps must organizations take to comply with AI regulations?'" },
   { label: "COUNT by topic", badge: "AGG", query: "SELECT COUNT(*), metadata.topic FROM regulations GROUP BY metadata.topic" },
+  { label: "REASON bias & fairness", badge: "LLM", query: "SELECT * FROM regulations REASON 'How do these regulations address algorithmic bias and require fairness in AI decision-making systems?'" },
+  { label: "REASON high-risk AI", badge: "LLM", query: "SELECT * FROM regulations REASON 'How do these regulations define high-risk AI applications and what special obligations apply to them?'" },
+  { label: "REASON individual rights", badge: "LLM", query: "SELECT * FROM regulations REASON 'What rights do individuals have when subject to automated AI decision-making under these regulations?'" },
 ]
 
 const STEPS = [
@@ -27,6 +30,9 @@ const STEPS = [
   { num: 4, title: "REASON — Legal Q&A", badge: "LLM", desc: "Ask a legal question. ReasonDB synthesizes answers across all documents.", exIdx: 4 },
   { num: 5, title: "Compliance Check", badge: "LLM", desc: "Ask about compliance requirements across all regulations at once.", exIdx: 5 },
   { num: 6, title: "Aggregate by Topic", badge: "AGG", desc: "Count documents grouped by regulatory topic.", exIdx: 6 },
+  { num: 7, title: "REASON — Bias & Fairness", badge: "LLM", desc: "Explore how regulations address algorithmic bias and mandate fairness in AI systems.", exIdx: 7 },
+  { num: 8, title: "REASON — High-Risk AI", badge: "LLM", desc: "Understand how high-risk AI applications are defined and what special obligations apply.", exIdx: 8 },
+  { num: 9, title: "REASON — Individual Rights", badge: "LLM", desc: "Discover what rights individuals hold when subject to automated AI decision-making.", exIdx: 9 },
 ]
 
 const BADGE_COLORS: Record<string, string> = {
@@ -41,6 +47,7 @@ export default function Page() {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeStep, setActiveStep] = useState<number | null>(null)
+  const [playgroundIdx, setPlaygroundIdx] = useState(0)
 
   useEffect(() => {
     const url = localStorage.getItem("reasondb_server_url")
@@ -79,7 +86,7 @@ export default function Page() {
             <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide px-1 mb-2">Query Steps</p>
             {STEPS.map((step) => (
               <div key={step.num} className={`rounded-md border p-3 space-y-1.5 cursor-pointer transition-colors ${activeStep === step.num ? "border-amber-200 bg-amber-50" : "hover:bg-muted/40"}`}
-                onClick={() => { setActiveStep(step.num); setResult(null); setError(null) }}>
+                onClick={() => { setActiveStep(step.num); setPlaygroundIdx(step.exIdx); setResult(null); setError(null) }}>
                 <div className="flex items-center gap-2">
                   <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">{step.num}</span>
                   <span className="text-xs font-medium flex-1">{step.title}</span>
@@ -100,7 +107,7 @@ export default function Page() {
             <p className="text-xs text-muted-foreground">Search Federal Register AI regulations with RQL.</p>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            <QueryPlayground serverUrl={serverUrl} apiKey={apiKey} examples={EXAMPLES} onResult={setResult} onError={setError} isDataReady={isDataReady} />
+            <QueryPlayground serverUrl={serverUrl} apiKey={apiKey} examples={EXAMPLES} onResult={setResult} onError={setError} isDataReady={isDataReady} selectedIdx={playgroundIdx} />
             <Separator />
             <div><h3 className="text-sm font-semibold mb-3">Results</h3><ResultsDisplay result={result} error={error} /></div>
           </div>

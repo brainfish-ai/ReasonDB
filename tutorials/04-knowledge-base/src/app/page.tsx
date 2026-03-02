@@ -18,15 +18,21 @@ const EXAMPLES: ExampleQuery[] = [
   { label: "REASON explain ML", badge: "LLM", query: "SELECT * FROM wiki REASON 'Explain how machine learning models learn from data, citing specific techniques'" },
   { label: "REASON transformers", badge: "LLM", query: "SELECT * FROM wiki REASON 'What is the transformer architecture and why did it replace RNNs for NLP?'" },
   { label: "REASON comparison", badge: "LLM", query: "SELECT * FROM wiki REASON 'Compare supervised, unsupervised, and reinforcement learning with concrete examples'" },
+  { label: "REASON LLM challenges", badge: "LLM", query: "SELECT * FROM wiki REASON 'What are the main technical and ethical challenges in building and deploying large language models?'" },
+  { label: "REASON embeddings", badge: "LLM", query: "SELECT * FROM wiki REASON 'Explain the concept of embeddings — how do neural networks represent words, sentences, and documents as vectors?'" },
+  { label: "REASON NLP → LLM path", badge: "LLM", query: "SELECT * FROM wiki REASON 'Trace the evolution from classical NLP to transformers to modern LLMs — what were the key breakthroughs at each stage?'" },
 ]
 
 const STEPS = [
   { num: 1, title: "Browse Articles", badge: "SQL", desc: "List all Wikipedia ML articles in the knowledge base.", exIdx: 0 },
   { num: 2, title: "Tag Filtering", badge: "SQL", desc: "Filter articles by tag using CONTAINS ANY.", exIdx: 1 },
   { num: 3, title: "SEARCH Concepts", badge: "BM25", desc: "Find articles mentioning specific ML terms with BM25 ranking.", exIdx: 2 },
-  { num: 4, title: "REASON — Explain", badge: "LLM", desc: "Ask the knowledge base to explain ML concepts across articles.", exIdx: 4 },
+  { num: 4, title: "REASON — Explain ML", badge: "LLM", desc: "Ask the knowledge base to explain ML concepts across articles.", exIdx: 4 },
   { num: 5, title: "REASON — Transformers", badge: "LLM", desc: "Deep-dive into transformer architecture by synthesizing across docs.", exIdx: 5 },
-  { num: 6, title: "REASON — Compare", badge: "LLM", desc: "Compare learning paradigms by reasoning across all articles.", exIdx: 6 },
+  { num: 6, title: "REASON — Compare Paradigms", badge: "LLM", desc: "Compare supervised, unsupervised, and reinforcement learning across articles.", exIdx: 6 },
+  { num: 7, title: "REASON — LLM Challenges", badge: "LLM", desc: "Explore the technical and ethical challenges in building large language models.", exIdx: 7 },
+  { num: 8, title: "REASON — Embeddings", badge: "LLM", desc: "Understand how neural networks represent text as dense vector embeddings.", exIdx: 8 },
+  { num: 9, title: "REASON — NLP to LLM", badge: "LLM", desc: "Trace the full evolution from classical NLP through transformers to modern LLMs.", exIdx: 9 },
 ]
 
 const BADGE_COLORS: Record<string, string> = {
@@ -41,6 +47,7 @@ export default function Page() {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeStep, setActiveStep] = useState<number | null>(null)
+  const [playgroundIdx, setPlaygroundIdx] = useState(0)
 
   useEffect(() => {
     const url = localStorage.getItem("reasondb_server_url")
@@ -79,7 +86,7 @@ export default function Page() {
             <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide px-1 mb-2">Query Steps</p>
             {STEPS.map((step) => (
               <div key={step.num} className={`rounded-md border p-3 space-y-1.5 cursor-pointer transition-colors ${activeStep === step.num ? "border-emerald-200 bg-emerald-50" : "hover:bg-muted/40"}`}
-                onClick={() => { setActiveStep(step.num); setResult(null); setError(null) }}>
+                onClick={() => { setActiveStep(step.num); setPlaygroundIdx(step.exIdx); setResult(null); setError(null) }}>
                 <div className="flex items-center gap-2">
                   <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">{step.num}</span>
                   <span className="text-xs font-medium flex-1">{step.title}</span>
@@ -100,7 +107,7 @@ export default function Page() {
             <p className="text-xs text-muted-foreground">Ask natural language questions across your ML knowledge base.</p>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            <QueryPlayground serverUrl={serverUrl} apiKey={apiKey} examples={EXAMPLES} onResult={setResult} onError={setError} isDataReady={isDataReady} />
+            <QueryPlayground serverUrl={serverUrl} apiKey={apiKey} examples={EXAMPLES} onResult={setResult} onError={setError} isDataReady={isDataReady} selectedIdx={playgroundIdx} />
             <Separator />
             <div><h3 className="text-sm font-semibold mb-3">Results</h3><ResultsDisplay result={result} error={error} /></div>
           </div>
