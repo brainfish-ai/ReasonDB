@@ -33,8 +33,8 @@ jobs:
 
       - name: Configure git
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "Ajain"
+          git config user.email "ajainvivek07@gmail.com"
 
       - name: Compute next version
         id: version
