@@ -101,9 +101,9 @@ export function ResultsDisplay({ result, error }: Props) {
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-muted/80 backdrop-blur">
                   <tr>
-                    {result.columns.map((col) => (
+                    {result.columns.map((col, ci) => (
                       <th
-                        key={col}
+                        key={`${col}-${ci}`}
                         className="text-left px-3 py-2 font-medium text-muted-foreground whitespace-nowrap border-b"
                       >
                         {col}
@@ -114,7 +114,7 @@ export function ResultsDisplay({ result, error }: Props) {
                 <tbody>
                   {result.rows.map((row, i) => (
                     <tr key={i} className="border-b hover:bg-muted/30 transition-colors">
-                      {result.columns.map((col) => {
+                      {result.columns.map((col, ci) => {
                         const val = row[col]
                         const display =
                           val === null || val === undefined ? (
@@ -127,7 +127,7 @@ export function ResultsDisplay({ result, error }: Props) {
                             String(val)
                           )
                         return (
-                          <td key={col} className="px-3 py-2 max-w-xs truncate align-top">
+                          <td key={`${col}-${ci}`} className="px-3 py-2 max-w-xs truncate align-top">
                             {display}
                           </td>
                         )
