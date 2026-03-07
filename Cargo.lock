@@ -4742,7 +4742,7 @@ dependencies = [
 
 [[package]]
 name = "reasondb"
-version = "0.1.4"
+version = "0.2.0"
 dependencies = [
  "log",
  "serde",
@@ -4755,7 +4755,7 @@ dependencies = [
 
 [[package]]
 name = "reasondb-cli"
-version = "0.1.4"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4781,7 +4781,7 @@ dependencies = [
 
 [[package]]
 name = "reasondb-core"
-version = "0.1.4"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -4817,7 +4817,7 @@ dependencies = [
 
 [[package]]
 name = "reasondb-ingest"
-version = "0.1.4"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4837,7 +4837,7 @@ dependencies = [
 
 [[package]]
 name = "reasondb-plugin"
-version = "0.1.4"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4853,7 +4853,7 @@ dependencies = [
 
 [[package]]
 name = "reasondb-server"
-version = "0.1.4"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",

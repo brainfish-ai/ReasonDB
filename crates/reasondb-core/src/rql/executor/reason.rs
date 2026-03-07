@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
+use futures::future::join_all;
 use tokio::sync::mpsc;
 
 use crate::engine::{SearchConfig, SearchEngine};
@@ -48,6 +49,8 @@ pub struct NodeHit {
     pub title: String,
     pub score: f32,
     pub snippet: Option<String>,
+    /// Which query produced this hit: 0 = original, 1+ = sub-query index.
+    pub sub_query_idx: usize,
 }
 
 /// A candidate document with BM25 node-level hit info and tree-grep signals.
@@ -151,6 +154,38 @@ pub async fn execute_reason_query_with_progress<R: ReasoningEngine + Send + Sync
         }
     });
 
+    // ---------------------------------------------------------------
+    // PHASE 0: Query Decomposition (runs BEFORE Phase 1 so sub-queries
+    // can widen BM25 candidate selection).  A 3-second timeout keeps
+    // cold-path latency bounded — on timeout we fall back to the
+    // original query only.
+    // ---------------------------------------------------------------
+    send_progress(
+        &progress_tx,
+        ReasonProgress {
+            phase: ReasonPhase::Candidates,
+            status: ReasonPhaseStatus::Started,
+            message: "Decomposing query...".to_string(),
+            detail: Some(serde_json::json!({ "trace_id": trace_id })),
+        },
+    )
+    .await;
+
+    let sub_queries: Vec<SubQuery> = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        reasoner.decompose_query(reason_query, domain_context.as_ref()),
+    )
+    .await
+    .ok()
+    .and_then(|r| r.ok())
+    .unwrap_or_default();
+
+    tracing::info!(
+        sub_query_count = sub_queries.len(),
+        reason_query = %reason_query,
+        "REASON Phase 0 (decomposition): sub-queries generated"
+    );
+
     send_progress(
         &progress_tx,
         ReasonProgress {
@@ -163,10 +198,13 @@ pub async fn execute_reason_query_with_progress<R: ReasoningEngine + Send + Sync
     .await;
 
     // ---------------------------------------------------------------
-    // PHASE 1: BM25 Candidate Selection (original query, immediate)
+    // PHASE 1: BM25 Candidate Selection — original query + sub-queries
     //
-    // Phase 0 (query decomposition) is deferred to run concurrently
-    // with Phase 4 so it is completely off the critical path.
+    // Run BM25 for the original query and each sub-query, then union
+    // the candidate sets.  For each document the best BM25 score from
+    // any query is kept; node hits are merged and tagged with the
+    // sub_query_idx that found them so Phase 4 can verify them with
+    // the right query text.
     // ---------------------------------------------------------------
     let orig_candidates =
         get_candidates(store, query, reason_query, text_index, &table_id).unwrap_or_default();
@@ -174,7 +212,9 @@ pub async fn execute_reason_query_with_progress<R: ReasoningEngine + Send + Sync
 
     let mut phase1_hit_traces: Vec<crate::trace::Bm25HitTrace> = Vec::new();
     let mut combined_candidates: HashMap<String, CandidateDocument> = HashMap::new();
+    let mut bm25_hits_per_sub_query: Vec<usize> = vec![orig_candidate_count];
 
+    // Add original-query candidates (sub_query_idx = 0)
     for c in orig_candidates {
         let doc_id = c.document.id.clone();
         phase1_hit_traces.push(crate::trace::Bm25HitTrace {
@@ -185,6 +225,56 @@ pub async fn execute_reason_query_with_progress<R: ReasoningEngine + Send + Sync
             sub_query_index: 0,
         });
         combined_candidates.entry(doc_id).or_insert(c);
+    }
+
+    // Add sub-query candidates (sub_query_idx = 1..N)
+    for (sq_idx, sq) in sub_queries.iter().enumerate() {
+        let sq_query_idx = sq_idx + 1;
+        let sq_candidates =
+            get_candidates(store, query, &sq.text, text_index, &table_id).unwrap_or_default();
+        bm25_hits_per_sub_query.push(sq_candidates.len());
+
+        for mut c in sq_candidates {
+            // Tag all node hits from this sub-query
+            for hit in c.matched_nodes.iter_mut() {
+                hit.sub_query_idx = sq_query_idx;
+            }
+
+            let doc_id = c.document.id.clone();
+            phase1_hit_traces.push(crate::trace::Bm25HitTrace {
+                document_id: doc_id.clone(),
+                document_title: c.document.title.clone(),
+                score: c.bm25_score,
+                matched_node_count: c.matched_nodes.len(),
+                sub_query_index: sq_query_idx,
+            });
+
+            combined_candidates
+                .entry(doc_id)
+                .and_modify(|existing| {
+                    // Keep the higher BM25 score across queries
+                    if c.bm25_score > existing.bm25_score {
+                        existing.bm25_score = c.bm25_score;
+                    }
+                    // Merge node hits: add new nodes, keep lower sub_query_idx for
+                    // nodes found by multiple queries so they get verified with the
+                    // original query text (most precise).
+                    for node_hit in &c.matched_nodes {
+                        if let Some(existing_hit) = existing
+                            .matched_nodes
+                            .iter_mut()
+                            .find(|n| n.node_id == node_hit.node_id)
+                        {
+                            existing_hit.sub_query_idx =
+                                existing_hit.sub_query_idx.min(node_hit.sub_query_idx);
+                            existing_hit.score = existing_hit.score.max(node_hit.score);
+                        } else {
+                            existing.matched_nodes.push(node_hit.clone());
+                        }
+                    }
+                })
+                .or_insert(c);
+        }
     }
 
     let mut candidates: Vec<CandidateDocument> = combined_candidates.into_values().collect();
@@ -202,8 +292,9 @@ pub async fn execute_reason_query_with_progress<R: ReasoningEngine + Send + Sync
 
     tracing::info!(
         candidate_count = candidates.len(),
+        sub_query_count = sub_queries.len(),
         reason_query = %reason_query,
-        "REASON Phase 1 (BM25): candidates retrieved"
+        "REASON Phase 1 (BM25): candidates retrieved (union of original + sub-queries)"
     );
 
     send_progress(
@@ -336,39 +427,20 @@ pub async fn execute_reason_query_with_progress<R: ReasoningEngine + Send + Sync
     .await;
 
     // ---------------------------------------------------------------
-    // PHASE 0 + PHASE 4: Run concurrently
-    //
-    // Phase 0 (decompose, ~5s LLM call) is overlapped with Phase 4
-    // (deep beam search, ~5–10s).  Both run as independent futures
-    // polled by a single tokio::join!.  Decompose results are used for
-    // trace enrichment; Phase 4 uses ranked_candidates (which carry BM25
-    // node hits) to skip tree traversal for flat documents.
+    // PHASE 4: Deep LLM reasoning — passes sub-queries so Phase 4 can
+    // verify sub-query BM25 hits with the vocabulary-matched query text.
     // ---------------------------------------------------------------
-    let ((all_matches, total_llm_calls, docs_processed, beam_doc_traces), sub_queries_result) = tokio::join!(
+    let (all_matches, total_llm_calls, docs_processed, beam_doc_traces) =
         execute_parallel_reasoning_with_trace(
             &engine,
             ranked_candidates,
             reason_query,
+            &sub_queries,
             min_confidence,
             query,
             &progress_tx,
-        ),
-        reasoner.decompose_query(reason_query, domain_context.as_ref())
-    );
-
-    let sub_queries: Vec<SubQuery> = sub_queries_result.unwrap_or_else(|e| {
-        tracing::warn!("Query decomposition failed, using passthrough: {}", e);
-        vec![SubQuery {
-            text: reason_query.to_string(),
-            rationale: "Fallback to original query".to_string(),
-        }]
-    });
-
-    tracing::info!(
-        sub_query_count = sub_queries.len(),
-        reason_query = %reason_query,
-        "REASON Phase 0 (decomposition): sub-queries generated (concurrent with Phase 4)"
-    );
+        )
+        .await;
 
     let phase4_trace = BeamReasoningTrace {
         documents_processed: docs_processed,
@@ -431,19 +503,22 @@ pub async fn execute_reason_query_with_progress<R: ReasoningEngine + Send + Sync
 
     let duration_ms = start.elapsed().as_millis() as u64;
 
-    // Assemble and persist the full trace
-    // Build sub_query_traces from decompose results captured concurrently.
-    // BM25 was not run for sub-queries (they overlapped Phase 4), so
-    // bm25_hits is the original-query count for index 0 and 0 for the rest.
+    // Assemble and persist the full trace.
+    // Each sub-query now has real BM25 hit counts from Phase 1.
     let sub_query_traces: Vec<SubQueryTrace> = std::iter::once(SubQueryTrace {
         text: reason_query.to_string(),
         rationale: "Original query (BM25)".to_string(),
         bm25_hits: orig_candidate_count,
     })
-    .chain(sub_queries.iter().map(|sq| SubQueryTrace {
-        text: sq.text.clone(),
-        rationale: sq.rationale.clone(),
-        bm25_hits: 0,
+    .chain(sub_queries.iter().enumerate().map(|(sq_idx, sq)| {
+        SubQueryTrace {
+            text: sq.text.clone(),
+            rationale: sq.rationale.clone(),
+            bm25_hits: bm25_hits_per_sub_query
+                .get(sq_idx + 1)
+                .copied()
+                .unwrap_or(0),
+        }
     }))
     .collect();
 
@@ -612,6 +687,7 @@ fn search_with_bm25(
             title: hit.title,
             score: hit.score,
             snippet: hit.snippet,
+            sub_query_idx: 0,
         });
     }
 
@@ -829,16 +905,75 @@ async fn rank_documents_by_summary_with_trace<R: ReasoningEngine>(
 
 // ==================== Phase 4: Parallel Reasoning ====================
 
+/// Scope a query string to a specific document so the LLM evaluates nodes as
+/// "contributing to" the answer rather than "fully answering" it.
+fn scope_query_for_doc(query: &str, doc_title: &str) -> String {
+    if doc_title.is_empty() {
+        query.to_string()
+    } else {
+        format!(
+            "{}\n[Document context: searching within '{}'. Content that addresses any part of the above query for this document's subject is relevant.]",
+            query, doc_title
+        )
+    }
+}
+
+/// Merge multiple `SearchResponse` results into one.
+///
+/// For nodes that appear in more than one response the highest confidence
+/// score wins.  Stats are summed across all responses.
+fn merge_search_responses(
+    responses: impl IntoIterator<Item = crate::engine::SearchResponse>,
+) -> crate::engine::SearchResponse {
+    use crate::engine::{SearchResponse, TraversalStats};
+    use std::collections::HashMap as HM;
+
+    let mut by_node: HM<String, crate::engine::SearchResult> = HM::new();
+    let mut stats = TraversalStats::default();
+
+    for resp in responses {
+        stats.nodes_visited += resp.stats.nodes_visited;
+        stats.nodes_pruned += resp.stats.nodes_pruned;
+        stats.llm_calls += resp.stats.llm_calls;
+        stats.depth_reached = stats.depth_reached.max(resp.stats.depth_reached);
+
+        for result in resp.results {
+            by_node
+                .entry(result.node_id.clone())
+                .and_modify(|existing| {
+                    if result.confidence > existing.confidence {
+                        *existing = result.clone();
+                    }
+                })
+                .or_insert(result);
+        }
+    }
+
+    let mut results: Vec<_> = by_node.into_values().collect();
+    results.sort_by(|a, b| {
+        b.confidence
+            .partial_cmp(&a.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    SearchResponse { results, stats }
+}
+
 /// Phase 4: Execute deep reasoning on documents in parallel, collecting beam trace data.
 ///
 /// For documents where Phase 1 already found specific BM25 node hits, we
 /// directly verify those hits (sorted by BM25 score) instead of traversing
-/// the entire document tree.  This skips the expensive decide_next_step call
-/// for flat documents and ensures we score the most BM25-relevant nodes.
+/// the entire document tree.
+///
+/// When `sub_queries` is non-empty, node hits found exclusively by a sub-query
+/// (sub_query_idx > 0) are verified using that sub-query's text rather than the
+/// original query.  This prevents vocabulary-mismatched nodes from being scored
+/// against an unrelated query string.
 async fn execute_parallel_reasoning_with_trace<R: ReasoningEngine + Send + Sync + 'static>(
     engine: &SearchEngine<R>,
     candidates: Vec<CandidateDocument>,
     reason_query: &str,
+    sub_queries: &[SubQuery],
     min_confidence: Option<f32>,
     query: &Query,
     progress_tx: &Option<mpsc::Sender<ReasonProgress>>,
@@ -851,6 +986,7 @@ async fn execute_parallel_reasoning_with_trace<R: ReasoningEngine + Send + Sync 
     let mut docs_completed: usize = 0;
     let mut beam_doc_traces: Vec<BeamDocumentTrace> = Vec::new();
     let target_results = query.limit.as_ref().map(|l| l.count).unwrap_or(10);
+    let sub_query_count = sub_queries.len();
 
     // Maximum BM25 node hits to send directly to batch_verify per document.
     // Sorted by BM25 score so the most keyword-relevant nodes are picked first.
@@ -863,52 +999,118 @@ async fn execute_parallel_reasoning_with_trace<R: ReasoningEngine + Send + Sync 
             break;
         }
 
+        // Build per-document futures.  Each document gets:
+        //   1. A primary search with the original (doc-scoped) query
+        //      using the original-query BM25 hits (sub_query_idx == 0).
+        //   2. One supplementary verify call per sub-query for any node
+        //      hits that were found *only* by that sub-query (sub_query_idx > 0
+        //      and not already covered by primary hits).
+        // All calls run in parallel; results are merged by node_id.
         let futures: Vec<_> = chunk
             .iter()
             .map(|candidate| {
                 let doc = candidate.document.clone();
-                // Sort BM25 node hits by score descending and convert to (id, score) pairs.
-                let mut bm25_hits: Vec<(String, f32)> = candidate
+
+                // Original-query hits (sub_query_idx == 0)
+                let mut primary_hits: Vec<(String, f32)> = candidate
                     .matched_nodes
                     .iter()
+                    .filter(|h| h.sub_query_idx == 0)
                     .map(|h| (h.node_id.clone(), h.score))
                     .collect();
-                bm25_hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                bm25_hits.truncate(MAX_BM25_DIRECT);
+                primary_hits
+                    .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                primary_hits.truncate(MAX_BM25_DIRECT);
 
-                // Scope the query to this document so the beam search LLM evaluates
-                // nodes as "contributing to" the answer rather than "fully answering"
-                // it. This is critical for comparative queries (e.g. "Compare Apple,
-                // Tesla, and Microsoft revenue") where each document only holds data
-                // for one entity — without context, the LLM prunes all branches.
-                let doc_scoped_query = if doc.title.is_empty() {
-                    reason_query.to_string()
-                } else {
-                    format!(
-                        "{}\n[Document context: searching within '{}'. Content that addresses any part of the above query for this document's subject is relevant.]",
-                        reason_query, doc.title
-                    )
-                };
+                let primary_node_ids: std::collections::HashSet<String> =
+                    primary_hits.iter().map(|(id, _)| id.clone()).collect();
+
+                // Sub-query hits: nodes NOT already in primary_hits, grouped by sub-query index.
+                let supp_groups: Vec<(String, Vec<(String, f32)>)> = sub_queries
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(sq_idx, sq)| {
+                        let mut hits: Vec<(String, f32)> = candidate
+                            .matched_nodes
+                            .iter()
+                            .filter(|h| {
+                                h.sub_query_idx == sq_idx + 1
+                                    && !primary_node_ids.contains(&h.node_id)
+                            })
+                            .map(|h| (h.node_id.clone(), h.score))
+                            .collect();
+                        if hits.is_empty() {
+                            return None;
+                        }
+                        hits.sort_by(|a, b| {
+                            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                        hits.truncate(MAX_BM25_DIRECT);
+                        Some((scope_query_for_doc(&sq.text, &doc.title), hits))
+                    })
+                    .collect();
+
+                let doc_scoped_query = scope_query_for_doc(reason_query, &doc.title);
                 let cancel = cancel.clone();
+                let engine = engine.clone();
+
                 async move {
-                    let result = if !bm25_hits.is_empty() {
-                        // Fast path: BM25 already identified the best nodes.
-                        // Batch-verify them directly without tree traversal.
+                    // 1. Primary search
+                    let primary_result = if !primary_hits.is_empty() {
                         engine
-                            .verify_bm25_hits(&doc_scoped_query, &doc.id, bm25_hits, cancel)
+                            .verify_bm25_hits(
+                                &doc_scoped_query,
+                                &doc.id,
+                                primary_hits,
+                                cancel.clone(),
+                            )
                             .await
+                            .ok()
+                    } else if supp_groups.is_empty() {
+                        // No hits from any query — full tree traversal with original.
+                        engine
+                            .search_document_with_cancel(&doc_scoped_query, &doc.id, cancel.clone())
+                            .await
+                            .ok()
                     } else {
-                        // Fallback: no BM25 node hits → full tree traversal.
-                        engine
-                            .search_document_with_cancel(&doc_scoped_query, &doc.id, cancel)
-                            .await
+                        // No original-query hits but sub-query hits exist: skip tree
+                        // traversal (it would use wrong vocabulary).
+                        None
                     };
-                    (doc, result)
+
+                    // 2. Supplementary per-sub-query verification
+                    let supp_futures: Vec<_> = supp_groups
+                        .into_iter()
+                        .map(|(sq_scoped, sq_hits)| {
+                            let engine = engine.clone();
+                            let doc_id = doc.id.clone();
+                            let cancel = cancel.clone();
+                            async move {
+                                engine
+                                    .verify_bm25_hits(&sq_scoped, &doc_id, sq_hits, cancel)
+                                    .await
+                                    .ok()
+                            }
+                        })
+                        .collect();
+                    let supp_results = join_all(supp_futures).await;
+
+                    // 3. Merge primary + supplementary into one SearchResponse
+                    let merged = merge_search_responses(
+                        primary_result
+                            .into_iter()
+                            .chain(supp_results.into_iter().flatten()),
+                    );
+
+                    (
+                        doc,
+                        Ok::<crate::engine::SearchResponse, crate::error::ReasonError>(merged),
+                    )
                 }
             })
             .collect();
 
-        let results = futures::future::join_all(futures).await;
+        let results = join_all(futures).await;
 
         for (doc, search_result) in results {
             docs_completed += 1;
@@ -996,7 +1198,10 @@ async fn execute_parallel_reasoning_with_trace<R: ReasoningEngine + Send + Sync 
                             confidence: Some(best_confidence),
                         });
 
-                        if all_matches.len() >= target_results {
+                        // Scale the early-cancel threshold by sub-query count so we
+                        // keep exploring until all sub-conditions are represented.
+                        let cancel_threshold = target_results * sub_query_count.clamp(1, 3);
+                        if all_matches.len() >= cancel_threshold {
                             cancel.store(true, Ordering::Relaxed);
                         }
                     }
@@ -1012,7 +1217,7 @@ async fn execute_parallel_reasoning_with_trace<R: ReasoningEngine + Send + Sync 
             }
         }
 
-        if should_terminate_early(&all_matches, min_confidence, query) {
+        if should_terminate_early(&all_matches, min_confidence, query, sub_query_count) {
             break;
         }
     }
@@ -1027,17 +1232,24 @@ async fn execute_parallel_reasoning_with_trace<R: ReasoningEngine + Send + Sync 
 }
 
 /// Check if we should terminate early (enough high-confidence results).
+///
+/// For multi-condition queries the threshold is scaled by `sub_query_count`
+/// so we keep searching until results for all sub-conditions have been found.
 fn should_terminate_early(
     matches: &[DocumentMatch],
     min_confidence: Option<f32>,
     query: &Query,
+    sub_query_count: usize,
 ) -> bool {
     let target_results = query.limit.as_ref().map(|l| l.count).unwrap_or(10);
+    // Scale termination target by sub-query count (capped at 3x to avoid
+    // never terminating on very large decompositions).
+    let effective_target = target_results * sub_query_count.clamp(1, 3);
     let high_confidence_count = matches
         .iter()
         .filter(|m| m.confidence.unwrap_or(0.0) >= min_confidence.unwrap_or(0.3))
         .count();
-    high_confidence_count >= target_results * 2
+    high_confidence_count >= effective_target * 2
 }
 
 /// Apply pagination to results.

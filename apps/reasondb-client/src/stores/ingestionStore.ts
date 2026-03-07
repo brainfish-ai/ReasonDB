@@ -69,9 +69,9 @@ export const useIngestionStore = create<IngestionState>((set, get) => {
 
       let result: JobStatusResponse
       if (job.mode === 'text') {
-        result = await client.ingestText(job.payload as IngestTextRequest)
+        result = await client.ingestText(job.tableName, job.payload as IngestTextRequest)
       } else {
-        result = await client.ingestUrl(job.payload as IngestUrlRequest)
+        result = await client.ingestUrl(job.tableName, job.payload as IngestUrlRequest)
       }
 
       updateJob(job.id, {

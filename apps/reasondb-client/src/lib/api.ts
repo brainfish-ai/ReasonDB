@@ -436,7 +436,6 @@ interface QueryServerResponse {
 export interface IngestTextRequest {
   title: string
   content: string
-  table_id: string
   generate_summaries?: boolean
   tags?: string[]
   metadata?: Record<string, unknown>
@@ -444,7 +443,6 @@ export interface IngestTextRequest {
 
 export interface IngestUrlRequest {
   url: string
-  table_id: string
   generate_summaries?: boolean
 }
 
@@ -1001,15 +999,15 @@ class ReasonDBClient {
 
   // ==================== Ingestion ====================
 
-  async ingestText(request: IngestTextRequest): Promise<JobStatusResponse> {
-    return this.request<JobStatusResponse>('/v1/ingest/text', {
+  async ingestText(tableName: string, request: IngestTextRequest): Promise<JobStatusResponse> {
+    return this.request<JobStatusResponse>(`/v1/tables/${encodeURIComponent(tableName)}/ingest/text`, {
       method: 'POST',
       body: JSON.stringify(request),
     })
   }
 
-  async ingestUrl(request: IngestUrlRequest): Promise<JobStatusResponse> {
-    return this.request<JobStatusResponse>('/v1/ingest/url', {
+  async ingestUrl(tableName: string, request: IngestUrlRequest): Promise<JobStatusResponse> {
+    return this.request<JobStatusResponse>(`/v1/tables/${encodeURIComponent(tableName)}/ingest/url`, {
       method: 'POST',
       body: JSON.stringify(request),
     })

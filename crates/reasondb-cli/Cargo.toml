@@ -1,6 +1,6 @@
 [package]
 name = "reasondb-cli"
-version = "0.1.4"
+version = "0.2.0"
 edition = "2021"
 description = "Command-line interface for ReasonDB"
 license = "MIT OR Apache-2.0"

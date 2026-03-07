@@ -73,6 +73,21 @@ async fn put_llm_config(
     State(state): State<Arc<AppState<DynamicReasoner>>>,
     Json(settings): Json<LlmSettings>,
 ) -> ApiResult<Json<LlmSettings>> {
+    // If the client sent back masked API keys (the values we returned from GET),
+    // restore the real stored keys so we don't overwrite them with the sentinel.
+    let settings = if let Some(stored) = state
+        .store
+        .get_llm_settings()
+        .map_err(|e| ApiError::Internal(format!("Failed to read LLM settings: {}", e)))?
+    {
+        LlmSettings {
+            ingestion: settings.ingestion.unmask_with(&stored.ingestion),
+            retrieval: settings.retrieval.unmask_with(&stored.retrieval),
+        }
+    } else {
+        settings
+    };
+
     validate_settings(&settings)?;
 
     let reasoner = state.reasoner.as_ref();
@@ -111,6 +126,7 @@ async fn patch_llm_config(
     let reasoner = state.reasoner.as_ref();
 
     if let Some(ingestion) = patch.ingestion {
+        let ingestion = ingestion.unmask_with(&current.ingestion);
         let new_r = build_reasoner(&ingestion)
             .map_err(|e| ApiError::BadRequest(format!("Invalid ingestion config: {}", e)))?;
         reasoner.swap_ingestion(new_r);
@@ -122,6 +138,7 @@ async fn patch_llm_config(
     }
 
     if let Some(retrieval) = patch.retrieval {
+        let retrieval = retrieval.unmask_with(&current.retrieval);
         let new_r = build_reasoner(&retrieval)
             .map_err(|e| ApiError::BadRequest(format!("Invalid retrieval config: {}", e)))?;
         reasoner.swap_retrieval(new_r);

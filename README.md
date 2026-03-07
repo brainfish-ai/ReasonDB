@@ -108,8 +108,8 @@ Results on a real-world insurance document corpus (4 AIA policy documents, ~1,90
 | Metric | ReasonDB | Typical RAG |
 |---|---|---|
 | **Pass rate** | **100%** (12 / 12) | 55 – 70% |
-| **Context recall** (term match) | **88%** avg | 60 – 75% |
-| **Median latency** (RQL `REASON`) | **6s** | 15 – 45 s |
+| **Context recall** (term match) | **90%** avg | 60 – 75% |
+| **Median latency** (RQL `REASON`) | **6.1 s** | 15 – 45 s |
 
 > "Typical RAG" = chunked-retrieval pipelines (LlamaIndex / LangChain defaults) on the same corpus. ReasonDB uses BM25 candidate selection + LLM-guided hierarchical tree traversal instead of flat similarity matching.
 
@@ -117,11 +117,11 @@ Results on a real-world insurance document corpus (4 AIA policy documents, ~1,90
 
 | Category | Avg latency | Term recall | Pass |
 |---|---|---|---|
-| Simple | 5.5 s | 100% | 2 / 2 |
-| Specific | 5.6 s | 75% | 2 / 2 |
-| Multi-condition | 6.2 s | 67% | 2 / 2 |
-| Comparative | 5.8 s | 100% | 2 / 2 |
-| Multi-hop | 5.9 s | 83% | 2 / 2 |
+| Simple | 7.1 s | 100% | 2 / 2 |
+| Specific | 5.9 s | 75% | 2 / 2 |
+| Multi-condition | 5.6 s | 83% | 2 / 2 |
+| Comparative | 6.2 s | 100% | 2 / 2 |
+| Multi-hop | 6.5 s | 83% | 2 / 2 |
 | Synthesis | 6.5 s | 100% | 2 / 2 |
 
 ### Cross-section reference retrieval
@@ -130,10 +130,10 @@ ReasonDB detects and follows **intra-document cross-references** during ingestio
 
 | Metric | Value |
 |---|---|
-| Queries with ≥ 1 cross-ref surfaced | **5 / 5** |
-| Avg recall, primary content only | 87% |
-| Avg recall, primary + cross-refs | **93%** (+7 pp) |
-| Example gain | Unemployment benefit query: 67% → **100%** once cross-referenced waiting-period clause is included |
+| Queries with ≥ 1 cross-ref surfaced | **4 / 5** |
+| Avg recall, primary content only | 62% |
+| Avg recall, primary + cross-refs | **80%** (+18 pp) |
+| Example gain | Recurrent disability query: 67% → **100%** once cross-referenced policy schedule clause is included |
 
 <h2>How It Works</h2>
 

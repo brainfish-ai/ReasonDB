@@ -85,7 +85,7 @@ export function Toolbar({
 
       {/* Actions */}
       <div className="flex items-center gap-1 shrink-0">
-        <Button size="sm" variant="ghost" onClick={onRefresh} title="Refresh">
+        <Button size="sm" variant="ghost" onClick={onRefresh} disabled={isLoading} title="Refresh">
           <ArrowsClockwise size={16} className={isLoading ? 'animate-spin' : ''} />
         </Button>
 

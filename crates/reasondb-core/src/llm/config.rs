@@ -166,6 +166,19 @@ impl LlmModelConfig {
         copy.api_key = copy.api_key.map(|k| mask_key(&k));
         copy
     }
+
+    /// If this config's `api_key` is a masked sentinel (returned by `masked()`),
+    /// replace it with the real key from `stored`. Used by PUT/PATCH handlers so
+    /// that clients can round-trip settings without corrupting the stored key.
+    pub fn unmask_with(&self, stored: &LlmModelConfig) -> Self {
+        let mut copy = self.clone();
+        if let Some(ref key) = copy.api_key {
+            if is_masked_key(key) {
+                copy.api_key = stored.api_key.clone();
+            }
+        }
+        copy
+    }
 }
 
 impl From<&LLMProvider> for LlmModelConfig {
@@ -285,6 +298,14 @@ fn mask_key(key: &str) -> String {
     } else {
         format!("{}...{}", &key[..4], &key[key.len() - 4..])
     }
+}
+
+/// Returns `true` when `key` looks like a value produced by `mask_key`.
+///
+/// Masked keys are either `"****"` (short keys) or exactly 11 characters in
+/// the form `"xxxx...xxxx"` (4 chars + literal `...` + 4 chars).
+pub fn is_masked_key(key: &str) -> bool {
+    key == "****" || (key.len() == 11 && key.is_char_boundary(4) && &key[4..7] == "...")
 }
 
 #[cfg(test)]
