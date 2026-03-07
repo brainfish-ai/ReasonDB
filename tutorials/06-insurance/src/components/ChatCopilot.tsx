@@ -1,16 +1,20 @@
 "use client"
 import { useState, useRef, useEffect, useCallback } from "react"
-import { ArrowUp, Plus, Clock, X, Sparkles, Loader2, Code2 } from "lucide-react"
-import type { QueryResult } from "@/lib/api"
+import ReactMarkdown from "react-markdown"
+import { ArrowUp, Plus, Clock, X, Sparkles, Loader2, Code2, FileText } from "lucide-react"
+import type { QueryResult, MatchedNode } from "@/lib/api"
 
 interface Message {
   id: string
   role: "user" | "assistant"
   content: string
   rqlQuery?: string
-  status?: "building" | "running" | "done" | "error"
+  status?: "building" | "running" | "answering" | "done" | "error"
   progressMsg?: string
-  resultSummary?: string
+  nodes?: MatchedNode[]
+  question?: string
+  answer?: string
+  answerLoading?: boolean
 }
 
 interface Props {
@@ -24,20 +28,59 @@ interface Props {
   onClose?: () => void
 }
 
+/** Inline citation badge — clickable superscript number */
+function CitationBadge({ num, node }: { num: number; node: MatchedNode | undefined }) {
+  const [open, setOpen] = useState(false)
+  const label = node?.path?.length ? node.path[node.path.length - 1] : node?.title
+  const excerpt = node?.content ? node.content.slice(0, 160) + (node.content.length > 160 ? "…" : "") : ""
+
+  return (
+    <span className="relative inline-block leading-none">
+      <button
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        className="inline-flex items-center justify-center w-4 h-4 text-[9px] font-bold rounded-full bg-blue-100 text-blue-700 border border-blue-300 cursor-pointer hover:bg-blue-200 hover:scale-110 transition-all align-super mx-0.5"
+        title={label}
+      >
+        {num}
+      </button>
+      {open && node && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 w-64 rounded-lg border bg-white text-foreground shadow-lg p-3 pointer-events-none text-left">
+          <p className="text-[11px] font-semibold leading-tight mb-1">{label}</p>
+          <p className="text-[10px] text-muted-foreground leading-relaxed">{excerpt}</p>
+          <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-border" />
+        </div>
+      )}
+    </span>
+  )
+}
+
+/** Short document name derived from node path */
+function docLabel(node: MatchedNode): string {
+  const root = node.path?.[0] ?? node.title
+  if (root.toLowerCase().includes("income care")) return "Income Care Plus"
+  if (root.toLowerCase().includes("enhancement")) return "Priority Protection Enhancement"
+  if (root.toLowerCase().includes("incorporated") || root.toLowerCase().includes("ibr")) return "Priority Protection IBR"
+  if (root.toLowerCase().includes("priority")) return "Priority Protection PDS"
+  return root.split(" ").slice(0, 3).join(" ")
+}
+
 function MessageBubble({ msg }: { msg: Message }) {
   if (msg.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-[16px] rounded-tr-[4px] bg-[#1868DB] text-white px-3.5 py-2.5 text-[13px] leading-relaxed">
+        <div className="max-w-[85%] rounded-[16px] rounded-tr-[4px] bg-[#1868DB] text-white px-3.5 py-2.5 text-[13px] leading-relaxed">
           {msg.content}
         </div>
       </div>
     )
   }
 
+  const nodes = msg.nodes ?? []
+
   return (
     <div className="flex flex-col gap-2">
-      {/* Assistant icon row */}
+      {/* Brainfish Assist header */}
       <div className="flex items-center gap-2">
         <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0"
           style={{ background: "linear-gradient(168deg, #1868DB 0%, #7EE2B8 60%, #B3EE2B 100%)" }}>
@@ -46,7 +89,7 @@ function MessageBubble({ msg }: { msg: Message }) {
         <span className="text-[11px] font-medium text-muted-foreground">Brainfish Assist</span>
       </div>
 
-      {/* Building/running status */}
+      {/* Status: building / searching */}
       {(msg.status === "building" || msg.status === "running") && (
         <div className="ml-8 flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin shrink-0" />
@@ -54,7 +97,7 @@ function MessageBubble({ msg }: { msg: Message }) {
         </div>
       )}
 
-      {/* Generated RQL code snippet */}
+      {/* Generated RQL */}
       {msg.rqlQuery && (
         <div className="ml-8 rounded-lg border border-slate-200 bg-slate-50 overflow-hidden">
           <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-slate-200 bg-slate-100">
@@ -67,15 +110,76 @@ function MessageBubble({ msg }: { msg: Message }) {
         </div>
       )}
 
-      {/* Result summary */}
-      {msg.status === "done" && msg.resultSummary && (
-        <div className="ml-8 text-[13px] text-foreground leading-relaxed">
-          {msg.resultSummary}
+      {/* Answering spinner */}
+      {msg.status === "answering" && !msg.answer && (
+        <div className="ml-8 flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+          <span>Generating answer…</span>
+        </div>
+      )}
+
+      {/* Streaming answer with inline citation badges */}
+      {(msg.answer || msg.answerLoading) && (
+        <div className="ml-8 text-[13px] leading-relaxed text-foreground">
+          <div className="prose prose-sm max-w-none
+            [&_p]:text-[13px] [&_p]:leading-relaxed [&_p]:mb-2 [&_p:last-child]:mb-0
+            [&_ul]:text-[13px] [&_ul]:my-1.5 [&_ul]:pl-4 [&_ul>li]:mb-0.5
+            [&_ol]:text-[13px] [&_ol]:my-1.5 [&_ol]:pl-4 [&_ol>li]:mb-0.5
+            [&_strong]:font-semibold [&_strong]:text-foreground
+            [&_h2]:text-[13px] [&_h2]:font-bold [&_h2]:mb-1 [&_h2]:mt-2
+            [&_h3]:text-[13px] [&_h3]:font-semibold [&_h3]:mb-1 [&_h3]:mt-2
+            [&_code]:text-[11px] [&_code]:bg-muted [&_code]:px-1 [&_code]:rounded
+            [&_blockquote]:border-l-2 [&_blockquote]:border-blue-200 [&_blockquote]:pl-2 [&_blockquote]:italic [&_blockquote]:text-muted-foreground">
+            <ReactMarkdown
+              components={{
+                text({ children }) {
+                  const str = String(children)
+                  if (!/\[\d+\]/.test(str)) return <>{str}</>
+                  const parts = str.split(/(\[\d+\])/)
+                  return (
+                    <>
+                      {parts.map((part, i) => {
+                        const m = part.match(/^\[(\d+)\]$/)
+                        if (m) {
+                          const num = parseInt(m[1], 10)
+                          return <CitationBadge key={i} num={num} node={nodes[num - 1]} />
+                        }
+                        return <span key={i}>{part}</span>
+                      })}
+                    </>
+                  )
+                },
+              }}
+            >
+              {msg.answer ?? ""}
+            </ReactMarkdown>
+          </div>
+          {msg.answerLoading && (
+            <span className="inline-block w-1 h-4 bg-blue-500 animate-pulse rounded-sm align-text-bottom ml-0.5" />
+          )}
+        </div>
+      )}
+
+      {/* Compact source pills */}
+      {(msg.status === "done" || (msg.answer && !msg.answerLoading)) && nodes.length > 0 && (
+        <div className="ml-8 flex flex-wrap gap-1.5 pt-1">
+          {nodes.map((node, i) => (
+            <span
+              key={node.node_id}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 border border-blue-100 text-[10px] text-blue-700"
+            >
+              <FileText className="h-2.5 w-2.5 shrink-0" />
+              <span className="font-medium">{i + 1}</span>
+              <span className="text-blue-500">·</span>
+              <span className="max-w-[120px] truncate">{docLabel(node)}</span>
+              <span className="text-blue-400 tabular-nums">{Math.round(node.confidence * 100)}%</span>
+            </span>
+          ))}
         </div>
       )}
 
       {/* Error */}
-      {msg.status === "error" && (
+      {msg.status === "error" && !msg.answer && (
         <div className="ml-8 text-[13px] text-destructive">
           Something went wrong. Please try again.
         </div>
@@ -101,6 +205,7 @@ export function ChatCopilot({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const prevResultRef = useRef<QueryResult | null>(null)
   const prevRunningRef = useRef(false)
+  const answerAbortRef = useRef<AbortController | null>(null)
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -116,7 +221,71 @@ export function ChatCopilot({
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`
   }, [inputValue])
 
-  // Update assistant message as query runs
+  /** Stream the AI answer from /api/answer directly into the message bubble */
+  const streamAnswer = useCallback(async (msgId: string, question: string, nodes: MatchedNode[]) => {
+    if (answerAbortRef.current) answerAbortRef.current.abort()
+    const ctrl = new AbortController()
+    answerAbortRef.current = ctrl
+
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === msgId ? { ...m, status: "answering", answerLoading: true, answer: "" } : m
+      )
+    )
+
+    try {
+      const res = await fetch("/api/answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question,
+          context: nodes.map((n) => ({
+            title: n.title,
+            content: n.content,
+            confidence: n.confidence,
+            path: n.path,
+          })),
+        }),
+        signal: ctrl.signal,
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`)
+      }
+
+      const reader = res.body?.getReader()
+      if (!reader) throw new Error("No response body")
+      const decoder = new TextDecoder()
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const chunk = decoder.decode(value, { stream: true })
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === msgId ? { ...m, answer: (m.answer ?? "") + chunk } : m
+          )
+        )
+      }
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId ? { ...m, status: "done", answerLoading: false } : m
+        )
+      )
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === msgId ? { ...m, status: "error", answerLoading: false } : m
+          )
+        )
+      }
+    }
+  }, [])
+
+  // Update assistant message as query runs, then trigger answer streaming
   useEffect(() => {
     if (!pendingMsgId) return
 
@@ -143,23 +312,34 @@ export function ChatCopilot({
     // Query finished — result arrived
     if (!isRunning && prevRunningRef.current && result !== prevResultRef.current) {
       const nodes = result?.matchedNodes ?? []
-      const summary =
-        nodes.length > 0
-          ? `Found ${nodes.length} relevant section${nodes.length !== 1 ? "s" : ""} across the policy documents. See the centre panel for the full answer with citations.`
-          : "No matching sections found. Try rephrasing your question."
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === pendingMsgId
-            ? { ...m, status: nodes.length > 0 ? "done" : "error", resultSummary: summary }
-            : m
+      const question = result?.question ?? ""
+
+      if (nodes.length > 0 && question) {
+        // Store matched nodes in the message, then stream the answer
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === pendingMsgId ? { ...m, nodes, question } : m
+          )
         )
-      )
-      setPendingMsgId(null)
+        const msgId = pendingMsgId
+        setPendingMsgId(null)
+        streamAnswer(msgId, question, nodes)
+      } else {
+        // No results
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === pendingMsgId
+              ? { ...m, status: "error" }
+              : m
+          )
+        )
+        setPendingMsgId(null)
+      }
     }
 
     prevRunningRef.current = isRunning
     prevResultRef.current = result
-  }, [isRunning, progressMsg, result, pendingMsgId])
+  }, [isRunning, progressMsg, result, pendingMsgId, streamAnswer])
 
   const sendQuestion = useCallback(
     (question: string) => {
