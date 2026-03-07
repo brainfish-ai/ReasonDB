@@ -5,7 +5,7 @@ import fs from "fs/promises"
 const TABLE_NAME = "aia_insurance"
 const DATA_DIR = path.resolve(process.cwd(), "../data/insurance")
 
-interface PolicyMeta {
+interface InsuranceMeta {
   slug: string
   title: string
   policy: string
@@ -13,60 +13,54 @@ interface PolicyMeta {
   type: string
   insurer: string
   file: string
-  source_url?: string
-  url?: string
+  source_url: string
 }
 
 export async function initializeDataset(serverUrl: string, apiKey: string) {
   const base = serverUrl.replace(/\/$/, "")
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(apiKey ? { "X-API-Key": apiKey } : {}),
-  }
+  const authHeaders: Record<string, string> = apiKey ? { "X-API-Key": apiKey } : {}
 
+  // Create table
   await fetch(`${base}/v1/tables`, {
     method: "POST",
-    headers,
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({
       name: TABLE_NAME,
-      description: "Insurance policy documents — Income Care Plus (2011) and Priority Protection suite (2025)",
+      description: "AIA Australia insurance policy documents",
     }),
   }).catch(() => {})
 
-  const manifest: PolicyMeta[] = JSON.parse(
+  const manifest: InsuranceMeta[] = JSON.parse(
     await fs.readFile(path.join(DATA_DIR, "manifest.json"), "utf-8")
   )
 
   const jobIds: string[] = []
 
-  for (const policy of manifest) {
-    // Use pre-extracted .txt file to bypass the markitdown plugin timeout
-    const txtFile = policy.file.replace(/\.pdf$/, ".txt")
-    const txtPath = path.join(DATA_DIR, txtFile)
-
+  for (const doc of manifest) {
+    // Read the extracted text file (slug.txt)
+    const txtFile = path.join(DATA_DIR, `${doc.slug}.txt`)
     let content: string
     try {
-      content = await fs.readFile(txtPath, "utf-8")
+      content = await fs.readFile(txtFile, "utf-8")
     } catch {
-      // Fall back to PDF file ingestion if text not available
+      // Skip if text file not found
       continue
     }
 
     const res = await fetch(`${base}/v1/tables/${TABLE_NAME}/ingest/text`, {
       method: "POST",
-      headers,
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({
-        title: policy.title,
-        // Truncate to 200K chars — enough for even the large PDS
-        content: content.slice(0, 200_000),
-        tags: ["aia", "insurance", "australia", policy.type, policy.policy],
+        title: doc.title,
+        content,
+        tags: ["insurance", "aia-australia", doc.type, doc.policy],
         metadata: {
-          insurer: policy.insurer,
-          policy: policy.policy,
-          year: policy.year,
-          type: policy.type,
-          slug: policy.slug,
-          source_url: policy.source_url ?? policy.url ?? "",
+          slug: doc.slug,
+          policy: doc.policy,
+          year: doc.year,
+          type: doc.type,
+          insurer: doc.insurer,
+          source_url: doc.source_url,
         },
       }),
     })
@@ -79,3 +73,4 @@ export async function initializeDataset(serverUrl: string, apiKey: string) {
 
   return { jobIds, count: manifest.length }
 }
+

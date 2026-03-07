@@ -89,11 +89,11 @@ export function DataSetupPanel({
     setPhase("loading")
     setError(undefined)
     setProgress(0)
-    setStatusText("Creating table and submitting PDF URLs for ingestion…")
+    setStatusText("Creating table and reading data files…")
     try {
       const { jobIds, count } = await onInitialize(serverUrl, apiKey)
       setPhase("ingesting")
-      setStatusText(`Fetching and ingesting ${count} PDF documents from aia.com.au…`)
+      setStatusText(`Ingesting ${count} documents…`)
       await pollJobs(jobIds, count)
       const client = new ReasonDBClient(serverUrl, apiKey || undefined)
       const finalCount = await client.getTableDocCount(tableName)
