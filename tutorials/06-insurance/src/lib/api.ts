@@ -21,9 +21,7 @@ export interface QueryResult {
   columns: string[]
   rowCount: number
   executionTimeMs: number
-  /** Populated for REASON queries — the matched nodes with confidence scores */
   matchedNodes?: MatchedNode[]
-  /** The natural-language question extracted from the REASON clause */
   question?: string
 }
 
@@ -78,7 +76,6 @@ export class ReasonDBClient {
 
   async getTableDocCount(tableName: string): Promise<number> {
     try {
-      // /v1/tables/:id requires a UUID; use the list endpoint and match by name instead
       const res = await fetch(`${this.baseUrl}/v1/tables`, {
         headers: this.headers,
         signal: AbortSignal.timeout(5000),
@@ -169,7 +166,6 @@ export class ReasonDBClient {
 
   private transformResponse(data: QueryServerResponse, query?: string): QueryResult {
     if (data.documents && data.documents.length > 0) {
-      // Extract matched_nodes from all rows for REASON queries
       const matchedNodes: MatchedNode[] = []
       for (const doc of data.documents) {
         const nodes = doc.matched_nodes
@@ -179,7 +175,6 @@ export class ReasonDBClient {
           }
         }
       }
-
       return {
         columns: Object.keys(data.documents[0]),
         rows: data.documents,
@@ -205,7 +200,6 @@ export class ReasonDBClient {
   }
 }
 
-/** Extract the natural-language question from a REASON clause, e.g. REASON 'What is...' */
 function extractReasonQuestion(query: string): string | undefined {
   const match = query.match(/REASON\s+['"](.+?)['"]/i)
   return match?.[1]

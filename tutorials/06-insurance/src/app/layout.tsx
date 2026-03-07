@@ -4,8 +4,8 @@ import "./globals.css"
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" })
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" })
 export const metadata: Metadata = {
-  title: "Insurance Policy Analysis · ReasonDB Tutorial",
-  description: "Analyze income protection and life insurance policy documents using ReasonDB structural reasoning",
+  title: "Insurance Policy Analyser · ReasonDB Demo",
+  description: "AI-powered insurance policy analysis with cited answers and reasoning traces",
 }
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

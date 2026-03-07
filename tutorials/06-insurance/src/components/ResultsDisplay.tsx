@@ -21,8 +21,8 @@ export function ResultsDisplay({ result, error }: Props) {
   const [copied, setCopied] = useState(false)
   const isReason = !!(result?.matchedNodes && result.matchedNodes.length > 0)
 
-  // Auto-switch to Answer tab when a REASON result arrives
-  const [activeTab, setActiveTab] = useState("table")
+  // Default to Answer tab for REASON queries (key feature for insurance demo)
+  const [activeTab, setActiveTab] = useState("answer")
   useEffect(() => {
     setActiveTab(isReason ? "answer" : "table")
   }, [isReason, result])
@@ -32,7 +32,6 @@ export function ResultsDisplay({ result, error }: Props) {
     [result]
   )
 
-  // Auto-size the editor height: ~20px per line, capped between 160px and 480px
   const editorHeight = useMemo(() => {
     const lines = jsonString.split("\n").length
     return Math.min(Math.max(lines * 20, 160), 480)
@@ -57,7 +56,9 @@ export function ResultsDisplay({ result, error }: Props) {
   if (!result) {
     return (
       <div className="rounded-lg border border-dashed bg-muted/30 p-8 text-center">
-        <p className="text-sm text-muted-foreground">Run a query to see results here</p>
+        <p className="text-sm text-muted-foreground">
+          Ask a question in the chat or run a query to see results here
+        </p>
       </div>
     )
   }
@@ -81,15 +82,21 @@ export function ResultsDisplay({ result, error }: Props) {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="h-8">
-          <TabsTrigger value="table" className="text-xs h-7">Table</TabsTrigger>
-          <TabsTrigger value="json" className="text-xs h-7">JSON</TabsTrigger>
           {isReason && (
             <TabsTrigger value="answer" className="text-xs h-7 gap-1">
-              <Sparkles className="h-3 w-3 text-purple-500" />
+              <Sparkles className="h-3 w-3 text-blue-500" />
               Answer
             </TabsTrigger>
           )}
+          <TabsTrigger value="table" className="text-xs h-7">Table</TabsTrigger>
+          <TabsTrigger value="json" className="text-xs h-7">JSON</TabsTrigger>
         </TabsList>
+
+        {isReason && (
+          <TabsContent value="answer">
+            <AnswerPanel result={result} />
+          </TabsContent>
+        )}
 
         <TabsContent value="table">
           {result.rows.length === 0 ? (
@@ -102,10 +109,7 @@ export function ResultsDisplay({ result, error }: Props) {
                 <thead className="sticky top-0 bg-muted/80 backdrop-blur">
                   <tr>
                     {result.columns.map((col, ci) => (
-                      <th
-                        key={`${col}-${ci}`}
-                        className="text-left px-3 py-2 font-medium text-muted-foreground whitespace-nowrap border-b"
-                      >
+                      <th key={`${col}-${ci}`} className="text-left px-3 py-2 font-medium text-muted-foreground whitespace-nowrap border-b">
                         {col}
                       </th>
                     ))}
@@ -156,16 +160,10 @@ export function ResultsDisplay({ result, error }: Props) {
                 wordWrap: "off",
                 scrollBeyondLastLine: false,
                 folding: true,
-                foldingHighlight: true,
                 padding: { top: 8, bottom: 8 },
                 overviewRulerLanes: 0,
                 hideCursorInOverviewRuler: true,
-                scrollbar: {
-                  vertical: "auto",
-                  horizontal: "auto",
-                  verticalScrollbarSize: 6,
-                  horizontalScrollbarSize: 6,
-                },
+                scrollbar: { vertical: "auto", horizontal: "auto", verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },
                 renderLineHighlight: "none",
                 contextmenu: false,
                 glyphMargin: false,
@@ -175,12 +173,6 @@ export function ResultsDisplay({ result, error }: Props) {
             />
           </div>
         </TabsContent>
-
-        {isReason && (
-          <TabsContent value="answer">
-            <AnswerPanel result={result} />
-          </TabsContent>
-        )}
       </Tabs>
     </div>
   )

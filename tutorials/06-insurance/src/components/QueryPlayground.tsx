@@ -21,9 +21,12 @@ interface Props {
   examples: ExampleQuery[]
   onResult: (result: QueryResult | null) => void
   onError: (err: string | null) => void
+  onRunningChange?: (running: boolean) => void
+  onProgress?: (msg: string) => void
   isDataReady: boolean
-  accentColor?: string
   selectedIdx?: number
+  /** When set by the chat copilot, loads this query into the editor and auto-runs */
+  externalQuery?: string
 }
 
 const BADGE_STYLES: Record<string, string> = {
@@ -40,8 +43,11 @@ export function QueryPlayground({
   examples,
   onResult,
   onError,
+  onRunningChange,
+  onProgress,
   isDataReady,
   selectedIdx,
+  externalQuery,
 }: Props) {
   const [query, setQuery] = useState(examples[0]?.query ?? "")
   const [running, setRunning] = useState(false)
@@ -49,8 +55,6 @@ export function QueryPlayground({
   const [activeIdx, setActiveIdx] = useState(0)
   const [elapsed, setElapsed] = useState(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  // Keep a stable ref to `run` so the Monaco keybinding always calls the latest closure
   const runRef = useRef<() => void>(() => {})
 
   const isReason = query.toUpperCase().includes("REASON")
@@ -58,6 +62,7 @@ export function QueryPlayground({
   const run = async () => {
     if (!query.trim() || !serverUrl) return
     setRunning(true)
+    onRunningChange?.(true)
     setProgressMsg("")
     setElapsed(0)
     onResult(null)
@@ -72,7 +77,10 @@ export function QueryPlayground({
       const client = new ReasonDBClient(serverUrl, apiKey || undefined)
       let result
       if (isReason) {
-        result = await client.executeQueryStream(query, (msg) => setProgressMsg(msg))
+        result = await client.executeQueryStream(query, (msg) => {
+          setProgressMsg(msg)
+          onProgress?.(msg)
+        })
       } else {
         result = await client.executeQuery(query)
       }
@@ -82,15 +90,15 @@ export function QueryPlayground({
     } finally {
       if (timerRef.current) clearInterval(timerRef.current)
       setRunning(false)
+      onRunningChange?.(false)
       setProgressMsg("")
       setElapsed(0)
     }
   }
 
-  // Always keep runRef pointing at the latest run function
   runRef.current = run
 
-  // Sync when parent drives selectedIdx (e.g. clicking a step in the sidebar)
+  // Sync when parent drives selectedIdx (step panel clicks)
   useEffect(() => {
     if (selectedIdx !== undefined && examples[selectedIdx]) {
       setActiveIdx(selectedIdx)
@@ -101,6 +109,19 @@ export function QueryPlayground({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIdx])
 
+  // Handle external query from chat copilot — load + auto-run
+  useEffect(() => {
+    if (!externalQuery) return
+    setQuery(externalQuery)
+    setActiveIdx(-1) // deselect preset buttons
+    onResult(null)
+    onError(null)
+    // Small delay to let Monaco re-render with the new value
+    const timer = setTimeout(() => runRef.current(), 150)
+    return () => clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalQuery])
+
   const selectExample = (idx: number) => {
     setActiveIdx(idx)
     setQuery(examples[idx].query)
@@ -109,11 +130,8 @@ export function QueryPlayground({
   }
 
   const handleEditorMount: OnMount = (editor, monaco) => {
-    // Register shared RQL language + theme (idempotent)
     ensureTheme(monaco)
     registerRqlLanguage(monaco)
-
-    // Register ⌘/Ctrl+Enter to run the query
     editor.addAction({
       id: "run-query",
       label: "Run Query",
@@ -125,7 +143,7 @@ export function QueryPlayground({
 
   return (
     <div className="space-y-3">
-      {/* Preset buttons */}
+      {/* Preset example buttons */}
       <div className="flex flex-wrap gap-1.5">
         {examples.map((ex, i) => (
           <button
@@ -147,7 +165,7 @@ export function QueryPlayground({
         ))}
       </div>
 
-      {/* Monaco Editor — RQL language with ReasonDB dark theme */}
+      {/* Monaco Editor */}
       <div className="rounded-md overflow-hidden border border-slate-700">
         <MonacoEditor
           height={160}
