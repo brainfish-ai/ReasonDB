@@ -742,9 +742,12 @@ impl<R: ReasoningEngine> IngestPipeline<R> {
         R: Clone + Send + Sync + 'static,
     {
         // Phase 1: chunk + build tree (no summarization yet)
-        let (document, mut nodes) = self
+        let (mut document, mut nodes) = self
             .chunk_and_build(title, table_id, markdown, stats)
             .await?;
+
+        // Store original markdown so the document can be re-ingested via resync
+        document.source_content = Some(markdown.to_string());
 
         // Phase 1 flush: write doc + nodes (empty summaries) to DB immediately.
         // This protects the chunking work — a restart can resume summarization.

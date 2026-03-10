@@ -26,20 +26,82 @@ struct Document {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct IngestRequest {
+struct IngestTextBody {
     title: String,
     content: String,
-    table_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generate_summaries: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     tags: Option<Vec<String>>,
-    author: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<std::collections::HashMap<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chunk_strategy: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct IngestResponse {
+struct IngestResult {
     document_id: String,
     title: String,
     total_nodes: u64,
     max_depth: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+enum JobStatus {
+    Queued,
+    Processing {
+        #[serde(default)]
+        progress: Option<String>,
+    },
+    Completed {
+        result: IngestResult,
+    },
+    Failed {
+        error: String,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct JobStatusResponse {
+    job_id: String,
+    #[serde(flatten)]
+    status: JobStatus,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct MigrateResult {
+    document_id: String,
+    nodes_migrated: u64,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct MigrateAllResponse {
+    total_documents: u64,
+    migrated_documents: u64,
+    total_nodes_migrated: u64,
+    failed: u64,
+    results: Vec<MigrateResult>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ResyncResult {
+    document_id: String,
+    #[serde(default)]
+    job_id: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ResyncAllResponse {
+    total: u64,
+    queued: u64,
+    failed: u64,
+    results: Vec<ResyncResult>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -194,6 +256,12 @@ pub async fn run(url: &str, cmd: DocsCommands, format: OutputFormat) -> Result<(
             tags,
             author,
         } => {
+            let table = table.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "--table is required for ingest. Use `reasondb tables list` to see available tables."
+                )
+            })?;
+
             let content = if let Some(file_path) = file {
                 std::fs::read_to_string(&file_path)?
             } else if let Some(c) = content {
@@ -207,31 +275,236 @@ pub async fn run(url: &str, cmd: DocsCommands, format: OutputFormat) -> Result<(
             let tags: Option<Vec<String>> =
                 tags.map(|t| t.split(',').map(|s| s.trim().to_string()).collect());
 
-            let request = IngestRequest {
+            // Store author in metadata if provided
+            let metadata: Option<std::collections::HashMap<String, serde_json::Value>> = author
+                .map(|a| {
+                    let mut m = std::collections::HashMap::new();
+                    m.insert("author".to_string(), serde_json::Value::String(a));
+                    m
+                });
+
+            let request = IngestTextBody {
                 title: title.clone(),
                 content,
-                table_id: table,
+                generate_summaries: None,
                 tags,
-                author,
+                metadata,
+                chunk_strategy: None,
             };
 
-            let response: IngestResponse = client
-                .post(format!("{}/v1/ingest/text", url))
+            let job: JobStatusResponse = client
+                .post(format!("{}/v1/tables/{}/ingest/text", url, table))
                 .json(&request)
                 .send()
                 .await?
                 .json()
                 .await?;
 
-            match format {
-                OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&response)?);
+            let job_id = job.job_id.clone();
+            output::info(&format!(
+                "Ingestion queued (job: {})...",
+                &job_id[..job_id.len().min(12)]
+            ));
+
+            // Poll until the job completes or fails
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+
+                let status: JobStatusResponse = client
+                    .get(format!("{}/v1/jobs/{}", url, job_id))
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+
+                match status.status {
+                    JobStatus::Completed { result } => {
+                        match format {
+                            OutputFormat::Json => {
+                                println!("{}", serde_json::to_string_pretty(&result)?);
+                            }
+                            _ => {
+                                output::success(&format!("Ingested document '{}'", title.green()));
+                                println!("  {} {}", "ID:".dimmed(), result.document_id);
+                                println!("  {} {}", "Nodes:".dimmed(), result.total_nodes);
+                                println!("  {} {}", "Depth:".dimmed(), result.max_depth);
+                            }
+                        }
+                        break;
+                    }
+                    JobStatus::Failed { error } => {
+                        return Err(anyhow::anyhow!("Ingestion failed: {}", error));
+                    }
+                    JobStatus::Processing { progress } => {
+                        if let Some(p) = progress {
+                            output::info(&p);
+                        }
+                    }
+                    JobStatus::Queued => {}
                 }
-                _ => {
-                    output::success(&format!("Ingested document '{}'", title.green()));
-                    println!("  {} {}", "ID:".dimmed(), response.document_id);
-                    println!("  {} {}", "Nodes:".dimmed(), response.total_nodes);
-                    println!("  {} {}", "Depth:".dimmed(), response.max_depth);
+            }
+        }
+
+        DocsCommands::Migrate { id } => {
+            if let Some(doc_id) = id {
+                let result: MigrateResult = client
+                    .post(format!("{}/v1/documents/{}/migrate", url, doc_id))
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+
+                match format {
+                    OutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&result)?);
+                    }
+                    _ => {
+                        if let Some(ref err) = result.error {
+                            eprintln!("{} {}", "Failed:".red().bold(), err);
+                        } else {
+                            output::success(&format!(
+                                "Migrated {} nodes for document '{}'",
+                                result.nodes_migrated, doc_id
+                            ));
+                        }
+                    }
+                }
+            } else {
+                let result: MigrateAllResponse = client
+                    .post(format!("{}/v1/documents/migrate", url))
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+
+                match format {
+                    OutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&result)?);
+                    }
+                    _ => {
+                        output::success(&format!(
+                            "Migrated {}/{} documents ({} nodes total, {} failed)",
+                            result.migrated_documents,
+                            result.total_documents,
+                            result.total_nodes_migrated,
+                            result.failed
+                        ));
+                        for r in &result.results {
+                            if let Some(ref err) = r.error {
+                                println!(
+                                    "  {} {} — {}",
+                                    "x".red(),
+                                    output::format_id(&r.document_id),
+                                    err
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        DocsCommands::Resync { ids, table, force } => {
+            if !ids.is_empty() && table.is_some() {
+                return Err(anyhow::anyhow!(
+                    "Cannot use both document IDs and --table at the same time"
+                ));
+            }
+
+            if !force {
+                let target = if ids.len() == 1 {
+                    format!("document '{}'", ids[0])
+                } else if ids.len() > 1 {
+                    format!("{} documents", ids.len())
+                } else if let Some(ref t) = table {
+                    format!("all documents in table '{}'", t)
+                } else {
+                    "ALL documents".to_string()
+                };
+                println!(
+                    "{} This will delete and re-ingest {} (including LLM summarization). Continue? [y/N] ",
+                    "Warning:".yellow().bold(),
+                    target.cyan(),
+                );
+
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input)?;
+
+                if !input.trim().eq_ignore_ascii_case("y") {
+                    output::info("Cancelled");
+                    return Ok(());
+                }
+            }
+
+            // Single document — use dedicated endpoint for cleaner output
+            if ids.len() == 1 {
+                let doc_id = &ids[0];
+                let result: ResyncResult = client
+                    .post(format!("{}/v1/documents/{}/resync", url, doc_id))
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+
+                match format {
+                    OutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&result)?);
+                    }
+                    _ => {
+                        if let Some(job_id) = &result.job_id {
+                            output::success(&format!("Resync queued for document '{}'", doc_id));
+                            println!("  {} {}", "Job ID:".dimmed(), job_id);
+                        } else {
+                            eprintln!(
+                                "{} {}",
+                                "Failed:".red().bold(),
+                                result.error.as_deref().unwrap_or("unknown error")
+                            );
+                        }
+                    }
+                }
+            } else {
+                // Multiple IDs, table filter, or all documents
+                let resync_url = if let Some(ref t) = table {
+                    format!("{}/v1/documents/resync?table_id={}", url, t)
+                } else {
+                    format!("{}/v1/documents/resync", url)
+                };
+
+                let body = if ids.is_empty() {
+                    serde_json::json!({})
+                } else {
+                    serde_json::json!({ "document_ids": ids })
+                };
+
+                let result: ResyncAllResponse = client
+                    .post(resync_url)
+                    .json(&body)
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+
+                match format {
+                    OutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&result)?);
+                    }
+                    _ => {
+                        output::success(&format!(
+                            "Resync queued for {}/{} documents ({} failed)",
+                            result.queued, result.total, result.failed
+                        ));
+                        for r in &result.results {
+                            if let Some(ref err) = r.error {
+                                println!(
+                                    "  {} {} — {}",
+                                    "x".red(),
+                                    output::format_id(&r.document_id),
+                                    err
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }

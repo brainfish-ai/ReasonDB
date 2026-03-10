@@ -90,6 +90,14 @@ fn v1_routes<R: ReasoningEngine + Clone + Send + Sync + 'static>(
         .route("/tables/:id/traces/:trace_id", get(query::get_trace::<R>))
         // Documents
         .route("/documents", get(documents::list_documents::<R>))
+        .route(
+            "/documents/migrate",
+            post(documents::migrate_all_documents::<R>),
+        )
+        .route(
+            "/documents/resync",
+            post(documents::resync_all_documents::<R>),
+        )
         .route("/documents/:id", get(documents::get_document::<R>))
         .route("/documents/:id", patch(documents::update_document::<R>))
         .route("/documents/:id", delete(documents::delete_document::<R>))
@@ -100,6 +108,14 @@ fn v1_routes<R: ReasoningEngine + Clone + Send + Sync + 'static>(
         .route(
             "/documents/:id/tree",
             get(documents::get_document_tree::<R>),
+        )
+        .route(
+            "/documents/:id/migrate",
+            post(documents::migrate_document::<R>),
+        )
+        .route(
+            "/documents/:id/resync",
+            post(documents::resync_document::<R>),
         )
         // Document Relations
         .route(

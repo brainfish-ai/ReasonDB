@@ -17,6 +17,7 @@ mod config;
 mod documents;
 mod indexes;
 mod jobs;
+pub mod migration;
 mod nodes;
 mod queries;
 pub mod rate_limits;

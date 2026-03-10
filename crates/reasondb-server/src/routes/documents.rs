@@ -3,7 +3,7 @@
 //! List, get, update, and delete documents.
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     Json,
 };
 use chrono::Utc;
@@ -11,11 +11,13 @@ use reasondb_core::llm::ReasoningEngine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use utoipa::ToSchema;
 
 use crate::{
     error::{ApiError, ApiResult, ErrorResponse},
+    jobs::JobRequest,
+    routes::ingest::IngestTextRequest,
     state::AppState,
 };
 
@@ -193,10 +195,7 @@ pub async fn list_documents<R: ReasoningEngine + Send + Sync + 'static>(
 ) -> ApiResult<Json<Vec<DocumentSummary>>> {
     debug!("Listing all documents");
 
-    let documents = state
-        .store
-        .list_documents()
-        .map_err(|e| ApiError::StorageError(e.to_string()))?;
+    let documents = state.store.list_documents().map_err(ApiError::from)?;
 
     let summaries: Vec<DocumentSummary> = documents
         .into_iter()
@@ -242,7 +241,7 @@ pub async fn get_document<R: ReasoningEngine + Send + Sync + 'static>(
     let document = state
         .store
         .get_document(&id)
-        .map_err(|e| ApiError::StorageError(e.to_string()))?
+        .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::NotFound(format!("Document not found: {}", id)))?;
 
     Ok(Json(DocumentDetail {
@@ -287,7 +286,7 @@ pub async fn update_document<R: ReasoningEngine + Send + Sync + 'static>(
     let mut doc = state
         .store
         .get_document(&id)
-        .map_err(|e| ApiError::StorageError(e.to_string()))?
+        .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::NotFound(format!("Document not found: {}", id)))?;
 
     if let Some(title) = request.title {
@@ -306,10 +305,7 @@ pub async fn update_document<R: ReasoningEngine + Send + Sync + 'static>(
     }
     doc.updated_at = Utc::now();
 
-    state
-        .store
-        .update_document(&doc)
-        .map_err(|e| ApiError::StorageError(e.to_string()))?;
+    state.store.update_document(&doc).map_err(ApiError::from)?;
 
     Ok(Json(serde_json::json!({
         "updated": true,
@@ -343,14 +339,21 @@ pub async fn delete_document<R: ReasoningEngine + Send + Sync + 'static>(
     let _document = state
         .store
         .get_document(&id)
-        .map_err(|e| ApiError::StorageError(e.to_string()))?
+        .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::NotFound(format!("Document not found: {}", id)))?;
 
     // Delete with cascade (deletes document and all nodes)
+    state.store.delete_document(&id).map_err(ApiError::from)?;
+
+    // Remove from BM25 text index
     state
-        .store
+        .text_index
         .delete_document(&id)
-        .map_err(|e| ApiError::StorageError(e.to_string()))?;
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    state
+        .text_index
+        .commit()
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     Ok(Json(serde_json::json!({
         "deleted": true,
@@ -384,13 +387,13 @@ pub async fn get_document_nodes<R: ReasoningEngine + Send + Sync + 'static>(
     let _document = state
         .store
         .get_document(&id)
-        .map_err(|e| ApiError::StorageError(e.to_string()))?
+        .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::NotFound(format!("Document not found: {}", id)))?;
 
     let nodes = state
         .store
         .get_nodes_for_document(&id)
-        .map_err(|e| ApiError::StorageError(e.to_string()))?;
+        .map_err(ApiError::from)?;
 
     let summaries: Vec<NodeSummary> = nodes
         .into_iter()
@@ -436,14 +439,14 @@ pub async fn get_document_tree<R: ReasoningEngine + Send + Sync + 'static>(
     let document = state
         .store
         .get_document(&id)
-        .map_err(|e| ApiError::StorageError(e.to_string()))?
+        .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::NotFound(format!("Document not found: {}", id)))?;
 
     // Get root node
     let root = state
         .store
         .get_node(&document.root_node_id)
-        .map_err(|e| ApiError::StorageError(e.to_string()))?
+        .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::Internal("Root node not found".to_string()))?;
 
     // Build tree recursively
@@ -453,7 +456,7 @@ pub async fn get_document_tree<R: ReasoningEngine + Send + Sync + 'static>(
     ) -> Result<TreeNode, ApiError> {
         let node = store
             .get_node(node_id)
-            .map_err(|e| ApiError::StorageError(e.to_string()))?
+            .map_err(ApiError::from)?
             .ok_or_else(|| ApiError::Internal(format!("Node not found: {}", node_id)))?;
 
         let is_leaf = node.is_leaf();
@@ -478,4 +481,421 @@ pub async fn get_document_tree<R: ReasoningEngine + Send + Sync + 'static>(
     let tree = build_tree(&state.store, &root.id)?;
 
     Ok(Json(tree))
+}
+
+// ==================== Migrate ====================
+
+/// Per-document result from a bulk migration
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MigrateResult {
+    /// Document ID
+    pub document_id: String,
+    /// Number of nodes rewritten in the new storage format
+    pub nodes_migrated: usize,
+    /// Error message if this document could not be migrated
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Migrate a single document's nodes to the current storage format
+///
+/// Reads all existing nodes (handling old bincode format via shadow-struct fallback)
+/// and rewrites them in the current rmp-serde format. All summaries, content, and
+/// tree structure are preserved exactly — no pipeline re-run, no LLM calls.
+///
+/// Use this after upgrading ReasonDB to repair nodes that were serialized with an
+/// older schema version.
+#[utoipa::path(
+    post,
+    path = "/v1/documents/{id}/migrate",
+    tag = "documents",
+    params(("id" = String, Path, description = "Document ID")),
+    responses(
+        (status = 200, description = "Nodes migrated", body = MigrateResult),
+        (status = 404, description = "Document not found", body = ErrorResponse),
+        (status = 500, description = "Internal error", body = ErrorResponse),
+    )
+)]
+pub async fn migrate_document<R: ReasoningEngine + Send + Sync + 'static>(
+    State(state): State<Arc<AppState<R>>>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<MigrateResult>> {
+    info!("Migrating document nodes: {}", id);
+
+    let _doc = state
+        .store
+        .get_document(&id)
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::NotFound(format!("Document not found: {}", id)))?;
+
+    let nodes = state
+        .store
+        .get_nodes_for_document(&id)
+        .map_err(ApiError::from)?;
+
+    let count = nodes.len();
+    for node in &nodes {
+        state.store.update_node(node).map_err(ApiError::from)?;
+    }
+
+    // Rewrite the document record itself (bincode → rmp-serde)
+    let doc = state
+        .store
+        .get_document(&id)
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::NotFound(format!("Document not found: {}", id)))?;
+    state.store.update_document(&doc).map_err(ApiError::from)?;
+
+    info!("Migrated {} nodes for document {}", count, id);
+
+    Ok(Json(MigrateResult {
+        document_id: id,
+        nodes_migrated: count,
+        error: None,
+    }))
+}
+
+/// Migrate all documents to the current storage format
+///
+/// Reads every node across all documents and rewrites them in the current
+/// rmp-serde format. All summaries, content, and tree structure are preserved.
+/// Safe to run multiple times (idempotent).
+#[utoipa::path(
+    post,
+    path = "/v1/documents/migrate",
+    tag = "documents",
+    responses(
+        (status = 200, description = "All nodes migrated"),
+        (status = 500, description = "Internal error", body = ErrorResponse),
+    )
+)]
+pub async fn migrate_all_documents<R: ReasoningEngine + Send + Sync + 'static>(
+    State(state): State<Arc<AppState<R>>>,
+) -> ApiResult<Json<serde_json::Value>> {
+    info!("Migrating all documents to current storage format");
+
+    let docs = state.store.list_documents().map_err(ApiError::from)?;
+    let total = docs.len();
+    let mut results: Vec<MigrateResult> = Vec::with_capacity(total);
+
+    for doc in &docs {
+        let doc_id = doc.id.clone();
+
+        let nodes = match state
+            .store
+            .get_nodes_for_document(&doc_id)
+            .map_err(ApiError::from)
+        {
+            Ok(n) => n,
+            Err(e) => {
+                warn!("Failed to read nodes for {}: {}", doc_id, e);
+                results.push(MigrateResult {
+                    document_id: doc_id,
+                    nodes_migrated: 0,
+                    error: Some(e.to_string()),
+                });
+                continue;
+            }
+        };
+
+        let count = nodes.len();
+        let mut node_err: Option<String> = None;
+        for node in &nodes {
+            if let Err(e) = state.store.update_node(node).map_err(ApiError::from) {
+                warn!(
+                    "Failed to rewrite node {} for doc {}: {}",
+                    node.id, doc_id, e
+                );
+                node_err = Some(e.to_string());
+                break;
+            }
+        }
+
+        // Rewrite the document record itself
+        if node_err.is_none() {
+            if let Err(e) = state.store.update_document(doc).map_err(ApiError::from) {
+                node_err = Some(e.to_string());
+            }
+        }
+
+        results.push(MigrateResult {
+            document_id: doc_id,
+            nodes_migrated: if node_err.is_none() { count } else { 0 },
+            error: node_err,
+        });
+    }
+
+    let migrated_docs = results.iter().filter(|r| r.error.is_none()).count();
+    let total_nodes: usize = results.iter().map(|r| r.nodes_migrated).sum();
+    let failed = results.iter().filter(|r| r.error.is_some()).count();
+
+    info!(
+        "Migration complete: {}/{} documents, {} nodes total",
+        migrated_docs, total, total_nodes
+    );
+
+    Ok(Json(serde_json::json!({
+        "total_documents": total,
+        "migrated_documents": migrated_docs,
+        "total_nodes_migrated": total_nodes,
+        "failed": failed,
+        "results": results,
+    })))
+}
+
+// ==================== Resync ====================
+
+/// Per-document result from a bulk resync
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ResyncResult {
+    /// Original document ID (before deletion)
+    pub document_id: String,
+    /// Job ID for the re-ingestion (poll /v1/jobs/:id for progress)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<String>,
+    /// Error message if this document could not be resynced
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Query parameters for the bulk resync endpoint
+#[derive(Debug, Deserialize)]
+pub struct ResyncAllParams {
+    /// Filter to a specific table (ignored when document_ids is provided)
+    pub table_id: Option<String>,
+}
+
+/// Optional request body for the bulk resync endpoint
+#[derive(Debug, Deserialize, Default, ToSchema)]
+pub struct ResyncBulkBody {
+    /// Explicit list of document IDs to resync (resync all/table-filtered if absent)
+    #[serde(default)]
+    pub document_ids: Option<Vec<String>>,
+}
+
+/// Re-ingest a single document
+///
+/// Deletes the document and all its nodes, then re-ingests from the stored
+/// source content including full LLM summarization. Returns a job ID to poll
+/// for progress.
+#[utoipa::path(
+    post,
+    path = "/v1/documents/{id}/resync",
+    tag = "documents",
+    params(("id" = String, Path, description = "Document ID")),
+    responses(
+        (status = 202, description = "Resync job queued", body = ResyncResult),
+        (status = 404, description = "Document not found", body = ErrorResponse),
+        (status = 422, description = "No source content available for re-ingestion", body = ErrorResponse),
+        (status = 500, description = "Internal error", body = ErrorResponse),
+    )
+)]
+pub async fn resync_document<R: ReasoningEngine + Clone + Send + Sync + 'static>(
+    State(state): State<Arc<AppState<R>>>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<ResyncResult>> {
+    info!("Resyncing document: {}", id);
+
+    let doc = state
+        .store
+        .get_document(&id)
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::NotFound(format!("Document not found: {}", id)))?;
+
+    let content = resolve_resync_content(&state, &doc).await?;
+
+    let title = doc.title.clone();
+    let table_id = doc.table_id.clone();
+    let tags = doc.tags.clone();
+
+    state.store.delete_document(&id).map_err(ApiError::from)?;
+    state
+        .text_index
+        .delete_document(&id)
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    state
+        .text_index
+        .commit()
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let job_id = state
+        .job_queue
+        .enqueue(JobRequest::Text(IngestTextRequest {
+            title,
+            content,
+            table_id,
+            tags: Some(tags),
+            metadata: None,
+            generate_summaries: Some(state.config.generate_summaries),
+            chunk_strategy: None,
+        }))
+        .map_err(ApiError::Internal)?;
+
+    Ok(Json(ResyncResult {
+        document_id: id,
+        job_id: Some(job_id),
+        error: None,
+    }))
+}
+
+/// Re-ingest documents (all, or filtered by table)
+///
+/// Deletes each document and its nodes, then re-ingests from stored source
+/// content including full LLM summarization. Optionally filter to a specific
+/// table via `?table_id=`. Returns a list of job IDs to poll for progress.
+#[utoipa::path(
+    post,
+    path = "/v1/documents/resync",
+    tag = "documents",
+    params(
+        ("table_id" = Option<String>, Query, description = "Limit resync to a specific table")
+    ),
+    responses(
+        (status = 202, description = "Resync jobs queued"),
+        (status = 500, description = "Internal error", body = ErrorResponse),
+    )
+)]
+pub async fn resync_all_documents<R: ReasoningEngine + Clone + Send + Sync + 'static>(
+    State(state): State<Arc<AppState<R>>>,
+    Query(params): Query<ResyncAllParams>,
+    body: Option<Json<ResyncBulkBody>>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let body = body.map(|b| b.0).unwrap_or_default();
+    info!(
+        "Resyncing documents (ids={:?}, table_id={:?})",
+        body.document_ids, params.table_id
+    );
+
+    let all_docs = state.store.list_documents().map_err(ApiError::from)?;
+
+    let docs: Vec<_> = if let Some(ids) = &body.document_ids {
+        // Explicit ID list takes priority
+        let id_set: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
+        all_docs
+            .into_iter()
+            .filter(|d| id_set.contains(d.id.as_str()))
+            .collect()
+    } else {
+        match &params.table_id {
+            Some(tid) => all_docs
+                .into_iter()
+                .filter(|d| &d.table_id == tid)
+                .collect(),
+            None => all_docs,
+        }
+    };
+
+    let total = docs.len();
+    let mut results: Vec<ResyncResult> = Vec::with_capacity(total);
+
+    for doc in docs {
+        let doc_id = doc.id.clone();
+        let content = match resolve_resync_content(&state, &doc).await {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("Skipping resync for {}: {}", doc_id, e);
+                results.push(ResyncResult {
+                    document_id: doc_id,
+                    job_id: None,
+                    error: Some(e.to_string()),
+                });
+                continue;
+            }
+        };
+
+        let title = doc.title.clone();
+        let table_id = doc.table_id.clone();
+        let tags = doc.tags.clone();
+
+        if let Err(e) = state.store.delete_document(&doc_id).map_err(ApiError::from) {
+            warn!("Failed to delete {} before resync: {}", doc_id, e);
+            results.push(ResyncResult {
+                document_id: doc_id,
+                job_id: None,
+                error: Some(e.to_string()),
+            });
+            continue;
+        }
+        // Best-effort: remove stale BM25 entries for this document
+        let _ = state.text_index.delete_document(&doc_id);
+
+        match state
+            .job_queue
+            .enqueue(JobRequest::Text(IngestTextRequest {
+                title,
+                content,
+                table_id,
+                tags: Some(tags),
+                metadata: None,
+                generate_summaries: Some(state.config.generate_summaries),
+                chunk_strategy: None,
+            }))
+            .map_err(ApiError::Internal)
+        {
+            Ok(job_id) => results.push(ResyncResult {
+                document_id: doc_id,
+                job_id: Some(job_id),
+                error: None,
+            }),
+            Err(e) => results.push(ResyncResult {
+                document_id: doc_id,
+                job_id: None,
+                error: Some(e.to_string()),
+            }),
+        }
+    }
+
+    // Commit all BM25 deletions in one pass
+    let _ = state.text_index.commit();
+
+    let succeeded = results.iter().filter(|r| r.job_id.is_some()).count();
+    let failed = results.iter().filter(|r| r.error.is_some()).count();
+
+    Ok(Json(serde_json::json!({
+        "total": total,
+        "queued": succeeded,
+        "failed": failed,
+        "results": results,
+    })))
+}
+
+/// Resolve the content to re-ingest for a document.
+///
+/// Priority:
+/// 1. `source_content` stored on the document (set for all ingestions after this release)
+/// 2. Reconstruct by concatenating leaf node content from the tree
+async fn resolve_resync_content<R: ReasoningEngine + Send + Sync + 'static>(
+    state: &AppState<R>,
+    doc: &reasondb_core::model::Document,
+) -> ApiResult<String> {
+    // Use stored content if present (all docs ingested after this release)
+    if let Some(ref content) = doc.source_content {
+        if !content.is_empty() {
+            return Ok(content.clone());
+        }
+    }
+
+    // Reconstruct from leaf nodes (docs ingested before this release)
+    let nodes = state
+        .store
+        .get_nodes_for_document(&doc.id)
+        .map_err(ApiError::from)?;
+
+    let mut leaf_nodes: Vec<_> = nodes.into_iter().filter(|n| n.is_leaf()).collect();
+    leaf_nodes.sort_by_key(|n| n.start_index);
+
+    let content: String = leaf_nodes
+        .iter()
+        .filter_map(|n| n.content.as_deref())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    if content.is_empty() {
+        return Err(ApiError::BadRequest(format!(
+            "Document '{}' has no stored content and no readable leaf nodes to reconstruct from",
+            doc.id
+        )));
+    }
+
+    Ok(content)
 }

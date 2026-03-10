@@ -81,6 +81,10 @@ pub struct Document {
 
     /// Document version
     pub version: Option<String>,
+
+    /// Original markdown content stored for re-ingestion (resync)
+    #[serde(default)]
+    pub source_content: Option<String>,
 }
 
 impl Document {
@@ -107,6 +111,7 @@ impl Document {
             source_url: None,
             language: None,
             version: None,
+            source_content: None,
         }
     }
 

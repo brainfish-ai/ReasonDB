@@ -6,6 +6,7 @@
 use redb::ReadableTable;
 
 use super::indexes::{index_document_in_txn, unindex_document_in_txn, update_table_count_in_txn};
+use super::migration::deserialize_document;
 use super::{NodeStore, DOCUMENTS_TABLE};
 use crate::error::{ReasonError, Result, StorageError};
 use crate::model::Document;
@@ -23,7 +24,8 @@ impl NodeStore {
         self.get_table_required(&doc.table_id)?;
 
         let key = doc.id.as_str();
-        let value = bincode::serialize(doc)?;
+        let value =
+            rmp_serde::to_vec_named(doc).map_err(|e| ReasonError::Serialization(e.to_string()))?;
 
         let write_txn = self.db.begin_write().map_err(StorageError::from)?;
         {
@@ -56,7 +58,7 @@ impl NodeStore {
             .map_err(|e| StorageError::TableError(e.to_string()))?
         {
             Some(value) => {
-                let doc: Document = bincode::deserialize(value.value())?;
+                let doc = deserialize_document(value.value())?;
                 Ok(Some(doc))
             }
             None => Ok(None),
@@ -82,7 +84,8 @@ impl NodeStore {
         }
 
         let key = doc.id.as_str();
-        let value = bincode::serialize(doc)?;
+        let value =
+            rmp_serde::to_vec_named(doc).map_err(|e| ReasonError::Serialization(e.to_string()))?;
 
         let write_txn = self.db.begin_write().map_err(StorageError::from)?;
         {
@@ -155,7 +158,7 @@ impl NodeStore {
             .map_err(|e| StorageError::TableError(e.to_string()))?
         {
             let (_, value) = result.map_err(|e| StorageError::TableError(e.to_string()))?;
-            let doc: Document = bincode::deserialize(value.value())?;
+            let doc = deserialize_document(value.value())?;
             docs.push(doc);
         }
         Ok(docs)
@@ -195,7 +198,8 @@ impl NodeStore {
             let mut updated_doc = doc.clone();
             updated_doc.table_id = new_table_id.to_string();
 
-            let value = bincode::serialize(&updated_doc)?;
+            let value = rmp_serde::to_vec_named(&updated_doc)
+                .map_err(|e| ReasonError::Serialization(e.to_string()))?;
             let mut table = write_txn
                 .open_table(DOCUMENTS_TABLE)
                 .map_err(StorageError::from)?;

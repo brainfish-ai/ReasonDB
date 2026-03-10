@@ -225,6 +225,27 @@ enum DocsCommands {
         #[arg(long)]
         author: Option<String>,
     },
+
+    /// Migrate documents to the current storage format (preserves all summaries and content)
+    Migrate {
+        /// Document ID to migrate (migrates all documents if omitted)
+        id: Option<String>,
+    },
+
+    /// Re-ingest documents from stored content, rebuilding nodes and summaries
+    Resync {
+        /// One or more document IDs to resync (mutually exclusive with --table)
+        #[arg(value_name = "ID")]
+        ids: Vec<String>,
+
+        /// Resync all documents in a specific table (mutually exclusive with ids)
+        #[arg(short, long)]
+        table: Option<String>,
+
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
+    },
 }
 
 #[tokio::main]

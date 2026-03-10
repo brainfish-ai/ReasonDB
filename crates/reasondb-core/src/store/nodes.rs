@@ -4,6 +4,7 @@
 
 use redb::ReadableTable;
 
+use super::migration::deserialize_node;
 use super::{NodeStore, DOC_NODES_INDEX, NODES_TABLE};
 use crate::error::{ReasonError, Result, StorageError};
 use crate::model::{NodeId, PageNode};
@@ -14,7 +15,8 @@ impl NodeStore {
     /// Insert a new node into the database.
     pub fn insert_node(&self, node: &PageNode) -> Result<()> {
         let key = node.id.as_str();
-        let value = bincode::serialize(node)?;
+        let value =
+            rmp_serde::to_vec_named(node).map_err(|e| ReasonError::Serialization(e.to_string()))?;
 
         let write_txn = self.db.begin_write().map_err(StorageError::from)?;
         {
@@ -48,7 +50,8 @@ impl NodeStore {
 
             for node in nodes {
                 let key = node.id.as_str();
-                let value = bincode::serialize(node)?;
+                let value = rmp_serde::to_vec_named(node)
+                    .map_err(|e| ReasonError::Serialization(e.to_string()))?;
                 table
                     .insert(key, value.as_slice())
                     .map_err(|e| StorageError::TableError(e.to_string()))?;
@@ -75,7 +78,7 @@ impl NodeStore {
             .map_err(|e| StorageError::TableError(e.to_string()))?
         {
             Some(value) => {
-                let node: PageNode = bincode::deserialize(value.value())?;
+                let node = deserialize_node(value.value())?;
                 Ok(Some(node))
             }
             None => Ok(None),
@@ -91,7 +94,8 @@ impl NodeStore {
     /// Update an existing node.
     pub fn update_node(&self, node: &PageNode) -> Result<()> {
         let key = node.id.as_str();
-        let value = bincode::serialize(node)?;
+        let value =
+            rmp_serde::to_vec_named(node).map_err(|e| ReasonError::Serialization(e.to_string()))?;
 
         let write_txn = self.db.begin_write().map_err(StorageError::from)?;
         {
