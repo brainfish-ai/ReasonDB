@@ -168,6 +168,9 @@ pub struct TreeNode {
     /// Whether this is a leaf node
     #[schema(example = false)]
     pub is_leaf: bool,
+    /// IDs of sibling nodes this node explicitly cross-references
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub cross_ref_node_ids: Vec<String>,
     /// Child nodes (recursive structure)
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<TreeNode>,
@@ -467,6 +470,7 @@ pub async fn get_document_tree<R: ReasoningEngine + Send + Sync + 'static>(
             content: node.content,
             depth: node.depth,
             is_leaf,
+            cross_ref_node_ids: node.metadata.cross_ref_node_ids,
             children,
         })
     }

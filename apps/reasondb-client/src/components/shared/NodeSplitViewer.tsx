@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useCallback, useEffect, forwardRef } from 'react'
-import { MagnifyingGlass, X, Article, ArticleNyTimes } from '@phosphor-icons/react'
+import { MagnifyingGlass, X, Article, ArticleNyTimes, ArrowsLeftRight, CaretDown } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
 import { SyntaxViewer } from './SyntaxViewer'
 import { palette } from '@/lib/monaco-theme'
@@ -11,6 +11,7 @@ export interface TreeNode {
   content?: string
   depth: number
   is_leaf: boolean
+  cross_ref_node_ids?: string[]
   children: TreeNode[]
 }
 
@@ -84,30 +85,44 @@ function findLeafPositions(json: string, leafNodes: TreeNode[]): LeafPosition[] 
 const ACCENT_COLOR = '#60a5fa'
 const LINE_HEIGHT = 20
 
+// Flatten all nodes in a tree into a map keyed by id
+function buildNodeMap(node: TreeNode, map: Map<string, TreeNode> = new Map()): Map<string, TreeNode> {
+  map.set(node.id, node)
+  for (const child of node.children || []) buildNodeMap(child, map)
+  return map
+}
+
 interface ContentBlockProps {
   node: TreeNode
   index: number
   isSelected: boolean
   isHovered: boolean
   searchQuery: string
+  nodeMap: Map<string, TreeNode>
+  crossRefOnly: boolean
   onSelect: () => void
   onHover: (hovered: boolean) => void
 }
 
 const ContentBlock = forwardRef<HTMLDivElement, ContentBlockProps>(
-  ({ node, isSelected, isHovered, searchQuery, onSelect, onHover }, ref) => {
+  ({ node, isSelected, isHovered, searchQuery, nodeMap, crossRefOnly, onSelect, onHover }, ref) => {
+    const refIds = node.cross_ref_node_ids ?? []
+    const refNodes = (refIds.map(id => nodeMap.get(id)).filter(Boolean) as TreeNode[])
+      .filter(n => {
+        // Skip nodes whose content is mostly "N/A" placeholder values (PDF form fields)
+        const text = n.content ?? n.summary ?? ''
+        const nonNaChars = text.split(/\s+/).filter(w => w.toLowerCase() !== 'n/a').join('').length
+        return nonNaChars >= 20
+      })
+
     const highlightContent = (text: string) => {
       if (!searchQuery.trim() || !text) return text
       const regex = new RegExp(`(${searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
       const parts = text.split(regex)
       return parts.map((part, i) =>
         regex.test(part) ? (
-          <mark key={i} className="bg-yellow/20 text-yellow rounded px-0.5">
-            {part}
-          </mark>
-        ) : (
-          part
-        )
+          <mark key={i} className="bg-yellow/20 text-yellow rounded px-0.5">{part}</mark>
+        ) : part
       )
     }
 
@@ -118,11 +133,17 @@ const ContentBlock = forwardRef<HTMLDivElement, ContentBlockProps>(
           'group relative transition-all duration-150 cursor-pointer',
           'rounded-r-lg pl-4 pr-4 py-3',
           'border-l-2',
-          isSelected 
-            ? 'border-l-blue bg-blue/10' 
-            : isHovered 
-              ? 'border-l-lavender bg-surface-0/40'
-              : 'border-l-overlay-0 hover:border-l-subtext-0'
+          refNodes.length > 0
+            ? isSelected
+              ? 'border-l-mauve bg-mauve/8'
+              : isHovered
+                ? 'border-l-mauve bg-mauve/5'
+                : 'border-l-mauve/40 hover:border-l-mauve'
+            : isSelected
+              ? 'border-l-blue bg-blue/10'
+              : isHovered
+                ? 'border-l-lavender bg-surface-0/40'
+                : 'border-l-overlay-0 hover:border-l-subtext-0'
         )}
         onClick={onSelect}
         onMouseEnter={() => onHover(true)}
@@ -131,22 +152,83 @@ const ContentBlock = forwardRef<HTMLDivElement, ContentBlockProps>(
         <p className={cn(
           'text-[15px] leading-[1.7] tracking-[-0.01em]',
           'font-normal whitespace-pre-wrap transition-colors duration-150',
-          isSelected 
-            ? 'text-text' 
-            : isHovered 
-              ? 'text-text'
-              : 'text-subtext-0'
+          isSelected ? 'text-text' : isHovered ? 'text-text' : 'text-subtext-0'
         )}>
-          {node.content ? (
-            highlightContent(node.content)
-          ) : (
+          {node.content ? highlightContent(node.content) : (
             <span className="italic text-subtext-0">No content</span>
           )}
         </p>
+
+        {/* Cross-ref footer — always visible when refs exist */}
+        {refNodes.length > 0 && (
+          <div
+            className="mt-3 pt-2.5 border-t border-mauve/15"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-1.5 mb-2">
+              <ArrowsLeftRight size={11} className="text-mauve/60 shrink-0" />
+              <span className="text-[10px] font-semibold text-mauve/70 uppercase tracking-wider">
+                References
+              </span>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {refNodes.map(refNode => (
+                <CrossRefPreview key={refNode.id} node={refNode} defaultExpanded={crossRefOnly} />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     )
   }
 )
+
+function CrossRefPreview({ node, defaultExpanded }: { node: TreeNode; defaultExpanded?: boolean }) {
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false)
+  const hasContent = !!node.content && node.content.trim().length > 0
+  const isLong = (node.content?.length ?? 0) > 300
+
+  return (
+    <div
+      className={cn(
+        'rounded-md border transition-colors overflow-hidden',
+        expanded
+          ? 'border-mauve/30 bg-mantle/80'
+          : 'border-mauve/20 bg-mantle/40 hover:border-mauve/35 hover:bg-mantle/60'
+      )}
+    >
+      {/* Title row — always visible, click to toggle content */}
+      <button
+        className="w-full flex items-center gap-2 px-3 py-2 text-left"
+        onClick={() => setExpanded(v => !v)}
+      >
+        <CaretDown
+          size={10}
+          className={cn('shrink-0 text-mauve/50 transition-transform', !expanded && '-rotate-90')}
+        />
+        <span className="text-[11px] font-semibold text-mauve/90 truncate flex-1">{node.title}</span>
+      </button>
+
+      {/* Content — only when expanded */}
+      {expanded && (
+        <div className="px-3 pb-3 border-t border-mauve/10">
+          {hasContent ? (
+            <>
+              <p className={cn(
+                'text-[11px] text-subtext-0 leading-relaxed whitespace-pre-wrap mt-2',
+                !isLong && 'line-clamp-none'
+              )}>
+                {node.content}
+              </p>
+            </>
+          ) : (
+            <p className="text-[11px] italic text-overlay-0 mt-2">{node.summary}</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 ContentBlock.displayName = 'ContentBlock'
 
@@ -160,6 +242,7 @@ export function NodeSplitViewer({ treeData, className }: NodeSplitViewerProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [showPreview, setShowPreview] = useState(false)
+  const [crossRefOnly, setCrossRefOnly] = useState(false)
 
   const contentRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const leftPanelRef = useRef<HTMLDivElement>(null)
@@ -171,17 +254,20 @@ export function NodeSplitViewer({ treeData, className }: NodeSplitViewerProps) {
   const [leftPanelWidth, setLeftPanelWidth] = useState(0)
 
   const leafNodes = useMemo(() => extractLeafNodes(treeData), [treeData])
+  const nodeMap = useMemo(() => buildNodeMap(treeData), [treeData])
 
   const filteredLeafNodes = useMemo(() => {
-    if (!searchQuery.trim()) return leafNodes
+    let nodes = leafNodes
+    if (crossRefOnly) nodes = nodes.filter(n => (n.cross_ref_node_ids?.length ?? 0) > 0)
+    if (!searchQuery.trim()) return nodes
     const query = searchQuery.toLowerCase()
-    return leafNodes.filter(
+    return nodes.filter(
       (node) =>
         node.title.toLowerCase().includes(query) ||
         node.content?.toLowerCase().includes(query) ||
         node.summary.toLowerCase().includes(query)
     )
-  }, [leafNodes, searchQuery])
+  }, [leafNodes, searchQuery, crossRefOnly])
 
   const stats = useMemo(() => calculateStats(treeData), [treeData])
   const fullJson = useMemo(() => JSON.stringify(treeData, null, 2), [treeData])
@@ -349,9 +435,22 @@ export function NodeSplitViewer({ treeData, className }: NodeSplitViewerProps) {
         </button>
       </div>
 
-      {searchQuery && (
-        <div className="px-4 py-1.5 text-xs text-overlay-0 border-b border-border bg-surface-0/30">
-          {filteredLeafNodes.length} of {leafNodes.length} sections
+      {(searchQuery || crossRefOnly) && (
+        <div className="px-4 py-1.5 text-xs text-overlay-0 border-b border-border bg-surface-0/30 flex items-center gap-2">
+          <span>{filteredLeafNodes.length} of {leafNodes.length} sections</span>
+          {crossRefOnly && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-mauve/15 text-mauve text-[10px] font-medium">
+              <ArrowsLeftRight size={9} />
+              cross-refs only
+              <button
+                onClick={() => setCrossRefOnly(false)}
+                className="ml-0.5 hover:text-red transition-colors"
+                aria-label="Clear filter"
+              >
+                <X size={9} />
+              </button>
+            </span>
+          )}
         </div>
       )}
 
@@ -443,6 +542,8 @@ export function NodeSplitViewer({ treeData, className }: NodeSplitViewerProps) {
                           node={node}
                           index={originalIndex}
                           searchQuery={searchQuery}
+                          nodeMap={nodeMap}
+                          crossRefOnly={crossRefOnly}
                           isSelected={selectedIndex === originalIndex}
                           isHovered={hoveredIndex === originalIndex}
                           onSelect={() => handleSelectContent(originalIndex)}
@@ -453,7 +554,7 @@ export function NodeSplitViewer({ treeData, className }: NodeSplitViewerProps) {
                   </div>
                 ) : (
                   <div className="flex items-center justify-center h-64 text-overlay-0 text-sm">
-                    {searchQuery ? 'No matching sections' : 'No content available'}
+                    {crossRefOnly ? 'No sections with cross-references' : searchQuery ? 'No matching sections' : 'No content available'}
                   </div>
                 )}
               </div>
@@ -466,7 +567,30 @@ export function NodeSplitViewer({ treeData, className }: NodeSplitViewerProps) {
       <div className="px-4 py-2 border-t border-border bg-surface-0/30">
         <div className="flex items-center justify-between text-xs text-overlay-0">
           <span>{stats.leafNodes} sections</span>
-          <span>{stats.totalChars.toLocaleString()} characters</span>
+          <div className="flex items-center gap-3">
+            {(() => {
+              const crossRefCount = leafNodes.filter(n => (n.cross_ref_node_ids?.length ?? 0) > 0).length
+              return crossRefCount > 0 ? (
+                <button
+                  onClick={() => {
+                    setCrossRefOnly(v => !v)
+                    setShowPreview(true)
+                  }}
+                  className={cn(
+                    'flex items-center gap-1 transition-colors rounded px-1 py-0.5',
+                    crossRefOnly
+                      ? 'text-mauve bg-mauve/15'
+                      : 'text-mauve/70 hover:text-mauve hover:bg-mauve/10'
+                  )}
+                  title="Filter preview to sections with cross-references"
+                >
+                  <ArrowsLeftRight size={10} />
+                  {crossRefCount} with cross-refs
+                </button>
+              ) : null
+            })()}
+            <span>{stats.totalChars.toLocaleString()} characters</span>
+          </div>
         </div>
       </div>
     </div>

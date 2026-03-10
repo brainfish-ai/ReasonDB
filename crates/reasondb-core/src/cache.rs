@@ -3,7 +3,7 @@
 //! Provides fast access to frequently accessed documents and summaries
 //! without hitting disk storage.
 
-use crate::engine::ReasoningStep;
+use crate::engine::{CrossRefSection, ReasoningStep};
 use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
@@ -223,6 +223,8 @@ pub struct CachedMatchedNode {
     pub path: Vec<String>,
     pub confidence: f32,
     pub reasoning_trace: Vec<ReasoningStep>,
+    /// Sibling sections this node explicitly references inline
+    pub cross_ref_sections: Vec<CrossRefSection>,
 }
 
 /// A cached match result
@@ -450,6 +452,7 @@ mod tests {
                     path: vec!["Contract".to_string(), "Penalties".to_string()],
                     confidence: 0.95,
                     reasoning_trace: vec![],
+                    cross_ref_sections: vec![],
                 }],
             }],
             cached_at: Instant::now(),

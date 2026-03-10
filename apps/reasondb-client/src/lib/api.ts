@@ -321,6 +321,7 @@ export interface TreeNode {
   content?: string  // Original content (only present for leaf nodes)
   depth: number
   is_leaf: boolean
+  cross_ref_node_ids?: string[]
   children: TreeNode[]
 }
 
@@ -350,6 +351,7 @@ export interface SearchResult {
   path: PathNode[]
   content: string
   confidence: number
+  cross_ref_sections?: CrossRefSection[]
 }
 
 export interface SearchStats {
@@ -401,6 +403,12 @@ export interface ReasoningStepResponse {
   confidence: number
 }
 
+export interface CrossRefSection {
+  node_id: string
+  title: string
+  content: string
+}
+
 export interface MatchedNodeResponse {
   node_id: string
   title: string
@@ -408,6 +416,7 @@ export interface MatchedNodeResponse {
   path: string[]
   confidence: number
   reasoning_trace: ReasoningStepResponse[]
+  cross_ref_sections?: CrossRefSection[]
 }
 
 interface QueryServerResponse {

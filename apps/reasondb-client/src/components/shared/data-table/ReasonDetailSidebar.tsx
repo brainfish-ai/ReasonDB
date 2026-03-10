@@ -11,10 +11,11 @@ import {
   GitBranch,
   CheckCircle,
   XCircle,
+  ArrowsLeftRight,
 } from '@phosphor-icons/react'
 import Markdown from 'react-markdown'
 import { cn } from '@/lib/utils'
-import type { MatchedNodeResponse, ReasoningStepResponse } from '@/lib/api'
+import type { CrossRefSection, MatchedNodeResponse, ReasoningStepResponse } from '@/lib/api'
 
 // ==================== Types ====================
 
@@ -175,6 +176,115 @@ function ContentBlock({ content }: { content: string }) {
   )
 }
 
+function CrossRefSectionsBlock({ sections }: { sections: CrossRefSection[] }) {
+  const [open, setOpen] = useState(true)
+
+  if (sections.length === 0) return null
+
+  return (
+    <div className="mt-3 rounded-lg border border-mauve/20 bg-mauve/5 overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-mauve/10 transition-colors"
+      >
+        <CaretDown
+          size={11}
+          className={cn('shrink-0 text-mauve/70 transition-transform', !open && '-rotate-90')}
+        />
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-mauve/80">
+          Cross References
+        </span>
+        <span className="ml-auto text-[10px] font-mono text-mauve/60">
+          {sections.length} section{sections.length !== 1 ? 's' : ''}
+        </span>
+      </button>
+
+      {open && (
+        <div className="border-t border-mauve/15 divide-y divide-border/30">
+          {sections.map((section, i) => (
+            <CrossRefSectionRow key={section.node_id || i} section={section} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CrossRefSectionRow({ section }: { section: CrossRefSection }) {
+  const [expanded, setExpanded] = useState(false)
+  const [raw, setRaw] = useState(false)
+  const isLong = section.content.length > 200
+
+  return (
+    <div className="px-3 py-2.5">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-xs font-medium text-text truncate flex-1 mr-2">{section.title}</span>
+        <div className="flex items-center gap-0.5 rounded bg-surface-1/50 p-0.5 shrink-0">
+          <button
+            onClick={() => setRaw(false)}
+            className={cn(
+              'flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors',
+              !raw ? 'bg-surface-0 text-text shadow-sm' : 'text-overlay-0 hover:text-text'
+            )}
+          >
+            <Eye size={9} />
+            Preview
+          </button>
+          <button
+            onClick={() => setRaw(true)}
+            className={cn(
+              'flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors',
+              raw ? 'bg-surface-0 text-text shadow-sm' : 'text-overlay-0 hover:text-text'
+            )}
+          >
+            <Code size={9} />
+            Raw
+          </button>
+        </div>
+      </div>
+
+      <div className="relative">
+        {raw ? (
+          <pre
+            className={cn(
+              'text-[11px] text-subtext-0 font-mono leading-relaxed whitespace-pre-wrap bg-base/40 border border-border/30 rounded p-2',
+              !expanded && isLong && 'max-h-[100px] overflow-hidden'
+            )}
+          >
+            {section.content}
+          </pre>
+        ) : (
+          <div
+            className={cn(
+              'prose-sm prose-invert max-w-none',
+              'prose-headings:text-text prose-headings:font-semibold prose-headings:mt-2 prose-headings:mb-1',
+              'prose-p:text-subtext-0 prose-p:text-xs prose-p:leading-relaxed prose-p:my-1',
+              'prose-strong:text-text prose-em:text-subtext-1',
+              'prose-code:text-[10px] prose-code:bg-surface-1 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-mauve',
+              'prose-li:text-xs prose-li:text-subtext-0',
+              !expanded && isLong && 'max-h-[100px] overflow-hidden'
+            )}
+          >
+            <Markdown>{section.content}</Markdown>
+          </div>
+        )}
+        {!expanded && isLong && (
+          <div className="absolute inset-x-0 bottom-0 h-8 bg-linear-to-t from-base/70 to-transparent rounded-b" />
+        )}
+      </div>
+
+      {isLong && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="mt-1 text-[10px] text-mauve hover:text-lavender transition-colors"
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 function MatchedNodeCard({ node, index }: { node: MatchedNodeResponse; index: number }) {
   const [open, setOpen] = useState(index === 0)
 
@@ -189,7 +299,16 @@ function MatchedNodeCard({ node, index }: { node: MatchedNodeResponse; index: nu
           size={12}
           className={cn('shrink-0 text-overlay-0 transition-transform', !open && '-rotate-90')}
         />
-        <span className="font-semibold text-sm text-text truncate">{node.title}</span>
+        <span className="font-semibold text-sm text-text truncate flex-1">{node.title}</span>
+        {node.cross_ref_sections && node.cross_ref_sections.length > 0 && (
+          <span
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-mauve/15 text-mauve text-[10px] font-medium shrink-0"
+            title={`${node.cross_ref_sections.length} cross-reference${node.cross_ref_sections.length !== 1 ? 's' : ''}`}
+          >
+            <ArrowsLeftRight size={10} />
+            {node.cross_ref_sections.length}
+          </span>
+        )}
         <ConfidenceBadge value={node.confidence} size="sm" />
       </button>
 
@@ -209,6 +328,9 @@ function MatchedNodeCard({ node, index }: { node: MatchedNodeResponse; index: nu
           {/* Reasoning */}
           <div className="px-4 pb-4">
             <ReasoningSteps steps={node.reasoning_trace} />
+            {node.cross_ref_sections && node.cross_ref_sections.length > 0 && (
+              <CrossRefSectionsBlock sections={node.cross_ref_sections} />
+            )}
           </div>
         </div>
       )}

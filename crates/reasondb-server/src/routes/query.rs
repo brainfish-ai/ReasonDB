@@ -23,6 +23,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use utoipa::ToSchema;
 
 use crate::error::ApiError;
+use crate::routes::search::CrossRefSectionResponse;
 use crate::state::AppState;
 
 /// RQL query request
@@ -121,6 +122,9 @@ pub struct MatchedNodeResponse {
     pub confidence: f32,
     /// The reasoning trace showing decisions that led here
     pub reasoning_trace: Vec<ReasoningStepResponse>,
+    /// Sibling sections this node explicitly references inline
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub cross_ref_sections: Vec<CrossRefSectionResponse>,
 }
 
 impl From<MatchedNode> for MatchedNodeResponse {
@@ -138,6 +142,15 @@ impl From<MatchedNode> for MatchedNodeResponse {
                     node_title: s.node_title,
                     decision: s.decision,
                     confidence: s.confidence,
+                })
+                .collect(),
+            cross_ref_sections: n
+                .cross_ref_sections
+                .into_iter()
+                .map(|s| CrossRefSectionResponse {
+                    node_id: s.node_id,
+                    title: s.title,
+                    content: s.content,
                 })
                 .collect(),
         }
@@ -470,6 +483,7 @@ async fn execute_select_query<R: ReasoningEngine + Send + Sync + 'static>(
                             path: n.path.clone(),
                             confidence: n.confidence,
                             reasoning_trace: n.reasoning_trace.clone(),
+                            cross_ref_sections: n.cross_ref_sections.clone(),
                         })
                         .collect();
                     let mut doc =
@@ -540,6 +554,7 @@ async fn execute_select_query<R: ReasoningEngine + Send + Sync + 'static>(
                             path: n.path.clone(),
                             confidence: n.confidence,
                             reasoning_trace: n.reasoning_trace.clone(),
+                            cross_ref_sections: n.cross_ref_sections.clone(),
                         })
                         .collect(),
                 })
@@ -655,6 +670,7 @@ pub async fn execute_query_stream<R: ReasoningEngine + Clone + Send + Sync + 'st
                             path: n.path.clone(),
                             confidence: n.confidence,
                             reasoning_trace: n.reasoning_trace.clone(),
+                            cross_ref_sections: n.cross_ref_sections.clone(),
                         })
                         .collect();
                     let mut doc =
@@ -763,6 +779,7 @@ pub async fn execute_query_stream<R: ReasoningEngine + Clone + Send + Sync + 'st
                                         path: n.path.clone(),
                                         confidence: n.confidence,
                                         reasoning_trace: n.reasoning_trace.clone(),
+                                        cross_ref_sections: n.cross_ref_sections.clone(),
                                     })
                                     .collect(),
                             })

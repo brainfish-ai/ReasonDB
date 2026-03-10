@@ -13,6 +13,13 @@ struct SearchRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct CrossRefSectionItem {
+    node_id: String,
+    title: String,
+    content: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct SearchResult {
     content: String,
     #[serde(default)]
@@ -23,6 +30,8 @@ struct SearchResult {
     node_id: Option<String>,
     #[serde(default)]
     path: Option<Vec<PathNode>>,
+    #[serde(default)]
+    cross_ref_sections: Vec<CrossRefSectionItem>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -77,14 +86,21 @@ pub async fn run(
             println!("{}", serde_json::to_string_pretty(&response)?);
         }
         OutputFormat::Csv => {
-            println!("document_id,confidence,title,content");
+            println!("document_id,confidence,title,content,cross_refs");
             for result in &response.results {
+                let cross_refs = result
+                    .cross_ref_sections
+                    .iter()
+                    .map(|s| s.title.as_str())
+                    .collect::<Vec<_>>()
+                    .join("|");
                 println!(
-                    "{},{:.2},{},\"{}\"",
+                    "{},{:.2},{},\"{}\",\"{}\"",
                     result.document_id,
                     result.confidence,
                     result.title.as_deref().unwrap_or(""),
-                    result.content.replace('"', "\"\"")
+                    result.content.replace('"', "\"\""),
+                    cross_refs.replace('"', "\"\"")
                 );
             }
         }
@@ -117,6 +133,36 @@ pub async fn run(
                         result.content.clone()
                     };
                     println!("   {}", content.dimmed());
+
+                    // Print cross-referenced sections if present
+                    if !result.cross_ref_sections.is_empty() {
+                        println!(
+                            "   {} {}",
+                            "→ References:".cyan(),
+                            result
+                                .cross_ref_sections
+                                .iter()
+                                .map(|s| s.title.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                                .yellow()
+                        );
+                        for section in &result.cross_ref_sections {
+                            let section_content = if section.content.chars().count() > 150 {
+                                let end = section
+                                    .content
+                                    .char_indices()
+                                    .nth(150)
+                                    .map(|(i, _)| i)
+                                    .unwrap_or(section.content.len());
+                                format!("{}...", &section.content[..end])
+                            } else {
+                                section.content.clone()
+                            };
+                            println!("     {} {}", "•".cyan().dimmed(), section_content.dimmed());
+                        }
+                    }
+
                     println!();
                 }
             }

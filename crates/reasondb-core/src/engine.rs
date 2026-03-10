@@ -844,15 +844,23 @@ impl<R: ReasoningEngine + 'static> SearchEngine<R> {
             .cross_ref_node_ids
             .iter()
             .filter_map(|id| {
-                self.store
-                    .get_node(id)
-                    .ok()
-                    .flatten()
-                    .map(|ref_node| CrossRefSection {
-                        node_id: ref_node.id.clone(),
-                        title: ref_node.title.clone(),
-                        content: ref_node.get_content().to_string(),
-                    })
+                let ref_node = self.store.get_node(id).ok().flatten()?;
+                let content = ref_node.get_content().to_string();
+                // Skip nodes whose content is mostly placeholder "N/A" values
+                // (e.g. empty form fields extracted from PDF tables).
+                let non_na_chars: usize = content
+                    .split_whitespace()
+                    .filter(|w| !w.eq_ignore_ascii_case("n/a"))
+                    .map(|w| w.len())
+                    .sum();
+                if non_na_chars < 20 {
+                    return None;
+                }
+                Some(CrossRefSection {
+                    node_id: ref_node.id.clone(),
+                    title: ref_node.title.clone(),
+                    content,
+                })
             })
             .collect()
     }

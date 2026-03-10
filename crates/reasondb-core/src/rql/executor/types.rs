@@ -2,7 +2,7 @@
 //!
 //! This module contains all the data structures returned from query execution.
 
-use crate::engine::ReasoningStep;
+use crate::engine::{CrossRefSection, ReasoningStep};
 use crate::model::Document;
 use serde::Serialize;
 
@@ -40,6 +40,9 @@ pub struct MatchedNode {
     pub confidence: f32,
     /// The reasoning trace showing decisions that led here
     pub reasoning_trace: Vec<ReasoningStep>,
+    /// Sibling sections this node explicitly references inline
+    /// (resolved from cross_ref_node_ids stored during ingestion).
+    pub cross_ref_sections: Vec<CrossRefSection>,
 }
 
 /// A document match with relevance info.

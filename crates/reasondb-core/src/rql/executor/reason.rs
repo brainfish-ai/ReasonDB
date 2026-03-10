@@ -1186,6 +1186,7 @@ async fn execute_parallel_reasoning_with_trace<R: ReasoningEngine + Send + Sync 
                             path: result.path,
                             confidence: result.confidence,
                             reasoning_trace: result.reasoning_trace,
+                            cross_ref_sections: result.cross_ref_sections,
                         });
                     }
 

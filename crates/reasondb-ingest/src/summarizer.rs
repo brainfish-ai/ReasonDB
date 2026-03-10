@@ -399,6 +399,24 @@ impl<'a, R: ReasoningEngine> BatchSummarizer<'a, R> {
                         nodes[idx].summary = summary.clone();
                         if !raw_refs.is_empty() {
                             let resolved = Self::resolve_refs(raw_refs, &title_map, &nodes[idx].id);
+                            // Filter out nodes whose content is mostly "N/A" placeholders
+                            // (e.g. empty PDF form fields) so they never pollute cross_ref_node_ids.
+                            let resolved: Vec<String> = resolved
+                                .into_iter()
+                                .filter(|id| {
+                                    let Some(ref_node) = nodes.iter().find(|n| &n.id == id) else {
+                                        return true; // keep if we can't check
+                                    };
+                                    let text =
+                                        ref_node.content.as_deref().unwrap_or(&ref_node.summary);
+                                    let non_na: usize = text
+                                        .split_whitespace()
+                                        .filter(|w| !w.eq_ignore_ascii_case("n/a"))
+                                        .map(|w| w.len())
+                                        .sum();
+                                    non_na >= 20
+                                })
+                                .collect();
                             if !resolved.is_empty() {
                                 info!(
                                     node = %node_id,
@@ -508,11 +526,37 @@ impl<'a, R: ReasoningEngine> BatchSummarizer<'a, R> {
                 .collect();
             let label = label.trim_end_matches('.');
             if !label.is_empty() {
+                // 2a. Exact key match (node title is literally the label, e.g. "10.2")
                 if let Some(id) = title_map.get(label) {
                     if id != self_id && !resolved.contains(id) {
                         resolved.push(id.clone());
                         continue;
                     }
+                }
+
+                // 2b. Scan for a title that starts with or contains the label as a
+                //     section-number prefix (e.g. ref "7.6" matches "7.6 disability benefit"
+                //     or "section 7.6 – exclusions").  The space/dash guards prevent "7.6"
+                //     from matching "17.6" or "7.62".
+                let prefix_space = format!("{} ", label);
+                let prefix_dash = format!("{}-", label);
+                let prefix_dot = format!("{}.", label); // sub-section: "7.6.1 …"
+                let mid_space = format!(" {} ", label);
+                let mid_dash = format!(" {}-", label);
+                let found = title_map.iter().find(|(k, id)| {
+                    if *id == self_id || resolved.contains(*id) {
+                        return false;
+                    }
+                    k.starts_with(&prefix_space)
+                        || k.starts_with(&prefix_dash)
+                        || k.starts_with(&prefix_dot)
+                        || k.contains(&mid_space)
+                        || k.contains(&mid_dash)
+                });
+                if let Some((_, id)) = found {
+                    let id = id.clone();
+                    resolved.push(id);
+                    continue;
                 }
             }
 
