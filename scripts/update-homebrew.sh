@@ -56,6 +56,9 @@ linux_block() {
   echo -e "$block"
 }
 
+MACOS_BLOCK=$(macos_block)
+LINUX_BLOCK=$(linux_block)
+
 cat > Formula/reasondb.rb << FORMULA
 class Reasondb < Formula
   desc "AI-native document database with hierarchical reasoning retrieval"
@@ -64,10 +67,12 @@ class Reasondb < Formula
   version "${BARE_VERSION}"
 
   on_macos do
-$(macos_block)  end
+${MACOS_BLOCK}
+  end
 
   on_linux do
-$(linux_block)  end
+${LINUX_BLOCK}
+  end
 
   def install
     bin.install "reasondb"
