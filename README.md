@@ -185,17 +185,16 @@ Get from zero to intelligent document search in under 5 minutes.
 
 #### Download pre-built binaries
 
-Grab the [latest release](https://github.com/reasondb/reasondb/releases/latest) for your platform:
+Grab the [latest release](https://github.com/brainfish-ai/reasondb/releases/latest) for your platform:
 
 | Platform | Architecture | Download |
 |----------|-------------|----------|
-| **macOS** | Apple Silicon (M1/M2/M3/M4) | [aarch64-apple-darwin](https://github.com/reasondb/reasondb/releases/latest) |
-| **macOS** | Intel | [x86_64-apple-darwin](https://github.com/reasondb/reasondb/releases/latest) |
-| **Linux** | x86_64 | [x86_64-unknown-linux-gnu](https://github.com/reasondb/reasondb/releases/latest) |
-| **Linux** | ARM64 | [aarch64-unknown-linux-gnu](https://github.com/reasondb/reasondb/releases/latest) |
-| **Windows** | x86_64 | [x86_64-pc-windows-msvc](https://github.com/reasondb/reasondb/releases/latest) |
+| **macOS** | Apple Silicon (M1/M2/M3/M4) | [aarch64-apple-darwin](https://github.com/brainfish-ai/reasondb/releases/latest) |
+| **Linux** | x86_64 | [x86_64-unknown-linux-gnu](https://github.com/brainfish-ai/reasondb/releases/latest) |
+| **Linux** | ARM64 | [aarch64-unknown-linux-gnu](https://github.com/brainfish-ai/reasondb/releases/latest) |
+| **Windows** | x86_64 | [x86_64-pc-windows-msvc](https://github.com/brainfish-ai/reasondb/releases/latest) |
 
-> **ReasonDB Client:** A desktop app is also available for [macOS (.dmg) and Windows (.msi)](https://github.com/reasondb/reasondb/releases/latest).
+> **ReasonDB Client:** A desktop app is also available for [macOS (.dmg) and Windows (.msi)](https://github.com/brainfish-ai/reasondb/releases/latest).
 
 <details>
 <summary><strong>macOS: "ReasonDB.app" Not Opened</strong></summary>
@@ -222,6 +221,18 @@ You can also go to **System Settings → Privacy & Security**, scroll down, and 
 ```bash
 brew tap brainfish-ai/reasondb-tap
 brew install reasondb
+```
+
+#### Install with one line (macOS / Linux)
+
+No Homebrew? Download and install directly:
+
+```bash
+# macOS Apple Silicon
+curl -L https://github.com/brainfish-ai/reasondb/releases/latest/download/reasondb-$(curl -s https://api.github.com/repos/brainfish-ai/reasondb/releases/latest | grep tag_name | cut -d'"' -f4)-aarch64-apple-darwin.tar.gz | tar -xz && sudo mv reasondb /usr/local/bin/
+
+# Linux x86_64
+curl -L https://github.com/brainfish-ai/reasondb/releases/latest/download/reasondb-$(curl -s https://api.github.com/repos/brainfish-ai/reasondb/releases/latest | grep tag_name | cut -d'"' -f4)-x86_64-unknown-linux-gnu.tar.gz | tar -xz && sudo mv reasondb /usr/local/bin/
 ```
 
 #### Install from source
