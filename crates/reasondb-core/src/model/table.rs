@@ -72,27 +72,27 @@ pub struct Table {
     /// when traversing and interpreting documents in this table.
     ///
     /// Examples: `["contract", "indemnification", "arbitration"]`
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub domain_vocab: Option<Vec<String>>,
 
     /// Contextual description for LLM reasoning.
     ///
     /// Provides background context about what this table contains and how
     /// documents should be interpreted during semantic search and reasoning.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub context: Option<String>,
 
     /// Instructions for LLM query and reasoning behavior on this table.
     ///
     /// Custom directives that guide how the LLM should answer questions
     /// or traverse documents within this table.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub instructions: Option<String>,
 
     /// Classification tags for this table.
     ///
     /// Used for grouping, filtering, and discovery of tables.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub tags: Option<Vec<String>>,
 
     /// Number of documents in this table
