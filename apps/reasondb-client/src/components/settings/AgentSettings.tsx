@@ -31,7 +31,6 @@ const PROVIDERS = [
   { value: 'openai', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'gemini', label: 'Google Gemini' },
-  { value: 'cohere', label: 'Cohere' },
   { value: 'glm', label: 'GLM (Zhipu AI)' },
   { value: 'kimi', label: 'Kimi (Moonshot)' },
   { value: 'ollama', label: 'Ollama (Local)' },
@@ -91,15 +90,6 @@ const PROVIDER_MODELS: Record<string, { value: string; label: string }[]> = {
     // Gemini 1.5
     { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
     { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
-  ],
-  cohere: [
-    // Command A (latest flagship, 111B)
-    { value: 'command-a-03-2025', label: 'Command A (Latest)' },
-    // Command R7B (smallest, fastest)
-    { value: 'command-r7b-12-2024', label: 'Command R7B' },
-    // Command R+ / R (versioned)
-    { value: 'command-r-plus-08-2024', label: 'Command R+' },
-    { value: 'command-r-08-2024', label: 'Command R' },
   ],
   glm: [
     { value: 'glm-4-plus', label: 'GLM-4 Plus' },
@@ -174,6 +164,11 @@ const PROVIDER_MODELS: Record<string, { value: string; label: string }[]> = {
 }
 
 const CUSTOM_MODEL_VALUE = '__custom__'
+
+/** Matches the sentinel values produced by the server's mask_key() — "xxxx...xxxx" or "****" */
+function isMaskedKey(key: string): boolean {
+  return key === '****' || /^.{4}\.\.\..{4}$/.test(key)
+}
 
 function ModelSelect({
   provider,
@@ -353,16 +348,31 @@ function ModelConfigForm({
             <label className="block text-xs font-medium text-subtext-0 mb-1">
               {isVertex ? 'Access token (Google Cloud)' : 'API Key'}
             </label>
-            <input
-              type="password"
-              value={config.api_key || ''}
-              onChange={(e) => update({ api_key: e.target.value || undefined })}
-              placeholder={isVertex ? 'Bearer token from gcloud auth' : 'sk-...'}
-              className={cn(
-                'w-full h-9 rounded-md border border-border bg-surface-0 px-3 py-2 text-sm',
-                'placeholder:text-overlay-0 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2'
+            <div className="relative">
+              <input
+                type={config.api_key && isMaskedKey(config.api_key) ? 'text' : 'password'}
+                value={config.api_key || ''}
+                onChange={(e) => update({ api_key: e.target.value || undefined })}
+                placeholder={isVertex ? 'Bearer token from gcloud auth' : 'sk-...'}
+                className={cn(
+                  'w-full h-9 rounded-md border bg-surface-0 px-3 py-2 text-sm pr-24',
+                  'placeholder:text-overlay-0 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2',
+                  config.api_key && isMaskedKey(config.api_key)
+                    ? 'border-green/40 text-subtext-0 font-mono'
+                    : 'border-border'
+                )}
+              />
+              {config.api_key && isMaskedKey(config.api_key) && (
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-green/15 text-green pointer-events-none">
+                  saved
+                </span>
               )}
-            />
+            </div>
+            {config.api_key && isMaskedKey(config.api_key) && (
+              <p className="mt-1 text-[11px] text-overlay-0">
+                Key saved — type a new value to replace it
+              </p>
+            )}
           </div>
         )}
 
@@ -507,12 +517,16 @@ export function AgentSettings() {
     return client
   }, [activeConnectionId, connections])
 
-  const runTest = useCallback(async () => {
+  const runTest = useCallback(async (currentSettings?: LlmSettingsType) => {
     const client = getOrCreateClient()
     if (!client) return
     setTesting(true)
     try {
-      const result = await client.testLlmConfig()
+      const result = await client.testLlmConfig(
+        currentSettings
+          ? { ingestion: currentSettings.ingestion, retrieval: currentSettings.retrieval }
+          : undefined
+      )
       setTestResult(result)
     } catch {
       setTestResult({
@@ -558,6 +572,7 @@ export function AgentSettings() {
 
   useEffect(() => {
     loadSettings().then(() => {
+      // runTest will use stored settings on initial load (settings state not yet populated here)
       runTest()
     })
   }, [loadSettings, runTest])
@@ -576,7 +591,7 @@ export function AgentSettings() {
       localStorage.setItem(CHUNK_STRATEGY_KEY, chunkStrategy)
       setSuccess('Agent settings saved successfully')
       setTimeout(() => setSuccess(null), 3000)
-      runTest()
+      runTest(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings')
     } finally {
@@ -618,7 +633,7 @@ export function AgentSettings() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={runTest}
+              onClick={() => runTest(settings ?? undefined)}
               disabled={testing}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md',

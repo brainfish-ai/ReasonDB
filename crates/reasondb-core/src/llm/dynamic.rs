@@ -3,7 +3,8 @@
 //! Wraps separate ingestion and retrieval `Reasoner` instances behind
 //! `ArcSwap` so they can be replaced at runtime without a server restart.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -18,10 +19,51 @@ use crate::llm::provider::Reasoner;
 use crate::llm::ReasoningConfig;
 use crate::query_decomposer::{DomainContext, SubQuery};
 
-/// Holds the two swappable reasoner instances.
+/// How long an LLM role stays marked unhealthy before auto-recovering.
+const UNHEALTHY_COOLDOWN: Duration = Duration::from_secs(60);
+
+/// Tracks whether an LLM role (ingestion or retrieval) is currently healthy.
+///
+/// A role is healthy by default.  It becomes unhealthy when `mark_unhealthy`
+/// is called (e.g. on a timeout).  It automatically recovers after
+/// `UNHEALTHY_COOLDOWN`, or immediately when `mark_healthy` is called (e.g.
+/// after a successful `/v1/config/llm/test`).
+struct HealthTracker {
+    unhealthy_since: Mutex<Option<Instant>>,
+}
+
+impl HealthTracker {
+    fn new() -> Self {
+        Self {
+            unhealthy_since: Mutex::new(None),
+        }
+    }
+
+    fn is_healthy(&self) -> bool {
+        match *self.unhealthy_since.lock().unwrap() {
+            None => true,
+            Some(t) => t.elapsed() >= UNHEALTHY_COOLDOWN,
+        }
+    }
+
+    fn mark_unhealthy(&self) {
+        let mut guard = self.unhealthy_since.lock().unwrap();
+        if guard.is_none() {
+            *guard = Some(Instant::now());
+        }
+    }
+
+    fn mark_healthy(&self) {
+        *self.unhealthy_since.lock().unwrap() = None;
+    }
+}
+
+/// Holds the two swappable reasoner instances and their health trackers.
 struct Inner {
     ingestion: ArcSwap<Reasoner>,
     retrieval: ArcSwap<Reasoner>,
+    ingestion_health: HealthTracker,
+    retrieval_health: HealthTracker,
 }
 
 /// A reasoning engine that routes calls to either an ingestion or retrieval
@@ -44,6 +86,8 @@ impl DynamicReasoner {
             inner: Arc::new(Inner {
                 ingestion: ArcSwap::from_pointee(ingestion),
                 retrieval: ArcSwap::from_pointee(retrieval),
+                ingestion_health: HealthTracker::new(),
+                retrieval_health: HealthTracker::new(),
             }),
         }
     }
@@ -184,6 +228,32 @@ impl ReasoningEngine for DynamicReasoner {
 
     fn name(&self) -> &str {
         "dynamic"
+    }
+
+    fn is_ingestion_healthy(&self) -> bool {
+        self.inner.ingestion_health.is_healthy()
+    }
+
+    fn is_retrieval_healthy(&self) -> bool {
+        self.inner.retrieval_health.is_healthy()
+    }
+
+    fn mark_ingestion_unhealthy(&self) {
+        tracing::warn!("LLM ingestion provider marked unhealthy — will auto-recover in 60s or on successful /v1/config/llm/test");
+        self.inner.ingestion_health.mark_unhealthy();
+    }
+
+    fn mark_retrieval_unhealthy(&self) {
+        tracing::warn!("LLM retrieval provider marked unhealthy — will auto-recover in 60s or on successful /v1/config/llm/test");
+        self.inner.retrieval_health.mark_unhealthy();
+    }
+
+    fn mark_ingestion_healthy(&self) {
+        self.inner.ingestion_health.mark_healthy();
+    }
+
+    fn mark_retrieval_healthy(&self) {
+        self.inner.retrieval_health.mark_healthy();
     }
 }
 

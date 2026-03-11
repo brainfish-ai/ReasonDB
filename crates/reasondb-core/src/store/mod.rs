@@ -1,8 +1,12 @@
 //! Storage engine for ReasonDB
 //!
 //! This module provides persistent storage using redb, a fast embedded database.
-//! It handles serialization with bincode and provides CRUD operations for
-//! tables, documents, nodes, and relationships. Includes secondary indexes for fast filtering.
+//! It provides CRUD operations for tables, documents, nodes, and relationships,
+//! with secondary indexes for fast filtering.
+//!
+//! Serialization formats per table:
+//! - `nodes`, `documents` — MessagePack (rmp-serde), with bincode/V1 fallback for legacy records
+//! - `tables`, `traces`, `rate_limits` — JSON, with bincode fallback for legacy records
 //!
 //! # Module Structure
 //!
@@ -37,13 +41,13 @@ use crate::error::{Result, StorageError};
 
 // ==================== Table Definitions ====================
 
-/// Primary table for nodes (NodeId -> bincode bytes)
+/// Primary table for nodes (NodeId -> MessagePack bytes)
 pub(crate) const NODES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("nodes");
 
-/// Primary table for documents (DocumentId -> bincode bytes)
+/// Primary table for documents (DocumentId -> MessagePack bytes)
 pub(crate) const DOCUMENTS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("documents");
 
-/// Primary table for tables (TableId -> bincode bytes)
+/// Primary table for tables (TableId -> JSON bytes)
 pub(crate) const TABLES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("tables");
 
 /// Document-to-nodes index (DocumentId -> node IDs as JSON)
@@ -66,17 +70,17 @@ pub(crate) const IDX_METADATA: MultimapTableDefinition<&str, &str> =
 pub(crate) const IDX_TABLE_SLUG: TableDefinition<&str, &str> =
     TableDefinition::new("idx_table_slug");
 
-/// Primary table for ingestion jobs (JobId -> bincode bytes)
+/// Primary table for ingestion jobs (JobId -> raw bytes, caller-managed encoding)
 pub(crate) const JOBS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("jobs");
 
 /// Job ordering index (timestamp_jobId -> JobId) for FIFO ordering
 pub(crate) const JOBS_ORDER_TABLE: TableDefinition<&str, &str> = TableDefinition::new("jobs_order");
 
-/// Rate limit snapshots (ClientId -> bincode bytes) for persistence across restarts
+/// Rate limit snapshots (ClientId -> JSON bytes) for persistence across restarts
 pub(crate) const RATE_LIMITS_TABLE: TableDefinition<&str, &[u8]> =
     TableDefinition::new("rate_limits");
 
-/// Query traces (TraceId -> bincode bytes) for audit and observability
+/// Query traces (TraceId -> JSON bytes) for audit and observability
 pub(crate) const TRACES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("traces");
 
 // ==================== NodeStore ====================
@@ -84,7 +88,7 @@ pub(crate) const TRACES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::n
 /// Storage engine for ReasonDB.
 ///
 /// Provides persistent storage for `Table`, `Document`, and `PageNode` objects using redb.
-/// All data is serialized using bincode for efficient binary encoding.
+/// Tables and traces are encoded as JSON; nodes and documents use MessagePack.
 /// Includes secondary indexes for fast filtered queries.
 ///
 /// # Example

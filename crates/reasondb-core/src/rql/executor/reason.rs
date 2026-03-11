@@ -134,7 +134,20 @@ pub async fn execute_reason_query_with_progress<R: ReasoningEngine + Send + Sync
 
     // ---------------------------------------------------------------
     // PHASE 0: Query Decomposition
+    //
+    // Step 0a: Run BM25 with the original query first (fast, no LLM).
+    // If we already get sufficient candidates we skip the LLM call
+    // entirely — the query has good keyword coverage and decomposition
+    // would add cost without benefit.
+    //
+    // Step 0b: When BM25 coverage is sparse the LLM is asked to decide
+    // whether decomposition is needed and, if so, to generate sub-queries.
+    // A 15-second timeout bounds cold-path latency.
     // ---------------------------------------------------------------
+
+    /// Minimum BM25 hit count at which we skip the LLM decomposition call.
+    const DECOMP_SKIP_THRESHOLD: usize = 3;
+
     let table = store.get_table(&table_id).ok().flatten();
     let domain_context: Option<DomainContext> = table.as_ref().map(|t| {
         let vocab_hints = t
@@ -147,19 +160,26 @@ pub async fn execute_reason_query_with_progress<R: ReasoningEngine + Send + Sync
                     .collect()
             })
             .unwrap_or_default();
+
+        let context_hints = t
+            .metadata
+            .get("domain_context")
+            .and_then(|v| v.as_object())
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+
         DomainContext {
             table_name: t.name.clone(),
             description: t.description.clone(),
             vocab_hints,
+            context_hints,
         }
     });
 
-    // ---------------------------------------------------------------
-    // PHASE 0: Query Decomposition (runs BEFORE Phase 1 so sub-queries
-    // can widen BM25 candidate selection).  A 3-second timeout keeps
-    // cold-path latency bounded — on timeout we fall back to the
-    // original query only.
-    // ---------------------------------------------------------------
     send_progress(
         &progress_tx,
         ReasonProgress {
@@ -171,19 +191,53 @@ pub async fn execute_reason_query_with_progress<R: ReasoningEngine + Send + Sync
     )
     .await;
 
-    let sub_queries: Vec<SubQuery> = tokio::time::timeout(
-        std::time::Duration::from_secs(3),
-        reasoner.decompose_query(reason_query, domain_context.as_ref()),
-    )
-    .await
-    .ok()
-    .and_then(|r| r.ok())
-    .unwrap_or_default();
+    // Step 0a: BM25 pre-filter — run original query before calling the LLM.
+    let orig_candidates =
+        get_candidates(store, query, reason_query, text_index, &table_id).unwrap_or_default();
+    let orig_candidate_count = orig_candidates.len();
+
+    let sub_queries: Vec<SubQuery> = if orig_candidate_count >= DECOMP_SKIP_THRESHOLD {
+        // Sufficient BM25 coverage — skip LLM decomposition entirely.
+        tracing::info!(
+            orig_candidate_count,
+            reason_query = %reason_query,
+            "REASON Phase 0: skipped LLM decomposition (BM25 coverage sufficient)"
+        );
+        vec![]
+    } else {
+        // Step 0b: sparse BM25 coverage — ask the LLM to decide and decompose.
+        let decompose_result = tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            reasoner.decompose_query(reason_query, domain_context.as_ref()),
+        )
+        .await;
+
+        match decompose_result {
+            Ok(Ok(sqs)) => sqs,
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    reason_query = %reason_query,
+                    error = %e,
+                    "REASON Phase 0: decomposition LLM error, using passthrough"
+                );
+                vec![]
+            }
+            Err(_elapsed) => {
+                tracing::warn!(
+                    reason_query = %reason_query,
+                    "REASON Phase 0: decomposition timed out (>15s), using passthrough"
+                );
+                reasoner.mark_retrieval_unhealthy();
+                vec![]
+            }
+        }
+    };
 
     tracing::info!(
         sub_query_count = sub_queries.len(),
+        orig_candidate_count,
         reason_query = %reason_query,
-        "REASON Phase 0 (decomposition): sub-queries generated"
+        "REASON Phase 0 (decomposition): complete"
     );
 
     send_progress(
@@ -200,16 +254,13 @@ pub async fn execute_reason_query_with_progress<R: ReasoningEngine + Send + Sync
     // ---------------------------------------------------------------
     // PHASE 1: BM25 Candidate Selection — original query + sub-queries
     //
-    // Run BM25 for the original query and each sub-query, then union
-    // the candidate sets.  For each document the best BM25 score from
+    // The original-query candidates were already fetched in Phase 0a.
+    // Here we add candidates from any sub-queries produced by the LLM
+    // and union the sets.  For each document the best BM25 score from
     // any query is kept; node hits are merged and tagged with the
     // sub_query_idx that found them so Phase 4 can verify them with
     // the right query text.
     // ---------------------------------------------------------------
-    let orig_candidates =
-        get_candidates(store, query, reason_query, text_index, &table_id).unwrap_or_default();
-    let orig_candidate_count = orig_candidates.len();
-
     let mut phase1_hit_traces: Vec<crate::trace::Bm25HitTrace> = Vec::new();
     let mut combined_candidates: HashMap<String, CandidateDocument> = HashMap::new();
     let mut bm25_hits_per_sub_query: Vec<usize> = vec![orig_candidate_count];
@@ -522,17 +573,13 @@ pub async fn execute_reason_query_with_progress<R: ReasoningEngine + Send + Sync
     }))
     .collect();
 
-    let decomposition_trace = if sub_queries.len() > 1
-        || sub_queries
-            .first()
-            .map(|sq| sq.text != reason_query)
-            .unwrap_or(false)
-    {
+    let decomposition_trace = if domain_context.is_some() {
         Some(DecompositionTrace {
             domain_context: domain_context.as_ref().map(|ctx| DomainContextTrace {
                 table_name: ctx.table_name.clone(),
                 description: ctx.description.clone(),
                 vocab_hints: ctx.vocab_hints.clone(),
+                context_hints: ctx.context_hints.clone(),
             }),
             sub_queries: sub_query_traces,
         })
@@ -862,11 +909,17 @@ async fn rank_documents_by_summary_with_trace<R: ReasoningEngine>(
         return (ranked, vec![]);
     }
 
-    let rankings = reasoner
+    let rankings = match reasoner
         .rank_documents(reason_query, &doc_summaries, target_docs)
         .await
-        .unwrap_or_else(|e| {
+    {
+        Ok(r) => {
+            reasoner.mark_retrieval_healthy();
+            r
+        }
+        Err(e) => {
             tracing::warn!("LLM ranking failed, using fallback ordering: {}", e);
+            reasoner.mark_retrieval_unhealthy();
             doc_summaries
                 .iter()
                 .take(target_docs)
@@ -876,7 +929,8 @@ async fn rank_documents_by_summary_with_trace<R: ReasoningEngine>(
                     reasoning: "Fallback".to_string(),
                 })
                 .collect()
-        });
+        }
+    };
 
     let ranking_traces = rankings
         .iter()
@@ -1133,6 +1187,15 @@ async fn execute_parallel_reasoning_with_trace<R: ReasoningEngine + Send + Sync 
             )
             .await;
 
+            // Fetch document-level summary once per document for context enrichment.
+            let document_summary: Option<String> = engine
+                .store()
+                .get_root_node(&doc.id)
+                .ok()
+                .flatten()
+                .map(|root| root.summary)
+                .filter(|s| !s.is_empty());
+
             match search_result {
                 Ok(response) => {
                     total_llm_calls += response.stats.llm_calls;
@@ -1197,6 +1260,7 @@ async fn execute_parallel_reasoning_with_trace<R: ReasoningEngine + Send + Sync 
                             matched_nodes: nodes_for_doc,
                             highlights: vec![],
                             confidence: Some(best_confidence),
+                            document_summary: document_summary.clone(),
                         });
 
                         // Scale the early-cancel threshold by sub-query count so we

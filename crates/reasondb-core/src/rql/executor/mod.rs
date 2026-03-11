@@ -499,6 +499,7 @@ impl NodeStore {
                 matched_nodes: Vec::new(),
                 highlights: snippet.into_iter().collect(),
                 confidence: None,
+                document_summary: None,
             })
             .collect()
     }
@@ -548,6 +549,7 @@ impl NodeStore {
                 matched_nodes: Vec::new(),
                 highlights: Vec::new(),
                 confidence: None,
+                document_summary: None,
             })
             .collect();
 
@@ -599,6 +601,7 @@ impl NodeStore {
                 matched_nodes: Vec::new(),
                 highlights: Vec::new(),
                 confidence: None,
+                document_summary: None,
             })
             .collect();
 

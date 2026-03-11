@@ -7,7 +7,7 @@ use redb::ReadableTable;
 use serde_json::Value;
 
 use super::{IDX_METADATA, IDX_TABLE_DOCS, IDX_TAG_DOCS, TABLES_TABLE};
-use crate::error::{Result, StorageError};
+use crate::error::{ReasonError, Result, StorageError};
 use crate::model::{Document, Table};
 
 /// Index a document in all secondary indexes.
@@ -109,19 +109,20 @@ pub(crate) fn update_table_count_in_txn(
 
         match table_opt {
             Some(value) => {
-                let t: Table = bincode::deserialize(value.value())?;
+                let t: Table = serde_json::from_slice(value.value())
+                    .map_err(|e| ReasonError::Serialization(e.to_string()))?;
                 Some(t)
             }
             None => None,
         }
     };
 
-    // Update and write back
     if let Some(mut table) = table_data {
         table.document_count = (table.document_count as i64 + doc_delta).max(0) as usize;
         table.total_nodes = (table.total_nodes as i64 + node_delta).max(0) as usize;
 
-        let value = bincode::serialize(&table)?;
+        let value =
+            serde_json::to_vec(&table).map_err(|e| ReasonError::Serialization(e.to_string()))?;
         tables
             .insert(table_id, value.as_slice())
             .map_err(|e| StorageError::TableError(e.to_string()))?;

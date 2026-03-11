@@ -181,23 +181,70 @@ struct LlmTestStatus {
     latency_ms: Option<u64>,
 }
 
-/// POST /v1/config/llm/test — test both ingestion and retrieval LLM connectivity
+/// Optional request body for test endpoint — allows testing unsaved settings
+#[derive(Debug, Deserialize)]
+struct TestLlmConfigBody {
+    ingestion: Option<reasondb_core::llm::config::LlmModelConfig>,
+    retrieval: Option<reasondb_core::llm::config::LlmModelConfig>,
+}
+
+/// POST /v1/config/llm/test — test both ingestion and retrieval LLM connectivity.
+/// If a request body with ingestion/retrieval settings is provided, those are tested
+/// directly without being persisted (allows testing unsaved form values).
 async fn test_llm_config(
     State(state): State<Arc<AppState<DynamicReasoner>>>,
+    body: Option<Json<TestLlmConfigBody>>,
 ) -> ApiResult<Json<LlmTestResult>> {
-    let settings = state
+    // Resolve the settings to test: prefer body fields, fall back to stored settings
+    let stored = state
         .store
         .get_llm_settings()
-        .map_err(|e| ApiError::Internal(format!("Failed to read LLM settings: {}", e)))?
-        .ok_or_else(|| {
-            ApiError::NotFound(
-                "No LLM settings configured yet. Use PUT /v1/config/llm to initialize.".into(),
-            )
-        })?;
+        .map_err(|e| ApiError::Internal(format!("Failed to read LLM settings: {}", e)))?;
 
-    let ingestion_reasoner = build_reasoner(&settings.ingestion)
+    let (ingestion_config, retrieval_config) = match body {
+        Some(Json(b)) => {
+            // For any field provided in the body, unmask against stored settings so
+            // masked sentinel keys ("••••…") are transparently replaced with real ones.
+            let base_ingestion = stored.as_ref().map(|s| &s.ingestion);
+            let base_retrieval = stored.as_ref().map(|s| &s.retrieval);
+
+            let ing = match (b.ingestion, base_ingestion) {
+                (Some(cfg), Some(base)) => cfg.unmask_with(base),
+                (Some(cfg), None) => cfg,
+                (None, Some(base)) => base.clone(),
+                (None, None) => {
+                    return Err(ApiError::NotFound(
+                        "No LLM settings configured yet. Use PUT /v1/config/llm to initialize."
+                            .into(),
+                    ))
+                }
+            };
+            let ret = match (b.retrieval, base_retrieval) {
+                (Some(cfg), Some(base)) => cfg.unmask_with(base),
+                (Some(cfg), None) => cfg,
+                (None, Some(base)) => base.clone(),
+                (None, None) => {
+                    return Err(ApiError::NotFound(
+                        "No LLM settings configured yet. Use PUT /v1/config/llm to initialize."
+                            .into(),
+                    ))
+                }
+            };
+            (ing, ret)
+        }
+        None => {
+            let s = stored.ok_or_else(|| {
+                ApiError::NotFound(
+                    "No LLM settings configured yet. Use PUT /v1/config/llm to initialize.".into(),
+                )
+            })?;
+            (s.ingestion, s.retrieval)
+        }
+    };
+
+    let ingestion_reasoner = build_reasoner(&ingestion_config)
         .map_err(|e| ApiError::BadRequest(format!("Cannot build ingestion reasoner: {}", e)))?;
-    let retrieval_reasoner = build_reasoner(&settings.retrieval)
+    let retrieval_reasoner = build_reasoner(&retrieval_config)
         .map_err(|e| ApiError::BadRequest(format!("Cannot build retrieval reasoner: {}", e)))?;
 
     let test_ctx = SummarizationContext {
@@ -269,6 +316,18 @@ async fn test_llm_config(
         retrieval_ok = ret_result.ok,
         "LLM config test completed"
     );
+
+    // Update health state so routes reflect the latest connectivity result.
+    if ing_result.ok {
+        state.reasoner.mark_ingestion_healthy();
+    } else {
+        state.reasoner.mark_ingestion_unhealthy();
+    }
+    if ret_result.ok {
+        state.reasoner.mark_retrieval_healthy();
+    } else {
+        state.reasoner.mark_retrieval_unhealthy();
+    }
 
     Ok(Json(LlmTestResult {
         ingestion: ing_result,

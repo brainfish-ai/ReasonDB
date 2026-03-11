@@ -383,7 +383,6 @@ fn llm_settings_from_env() -> anyhow::Result<LlmSettings> {
         "openai",
         "anthropic",
         "gemini",
-        "cohere",
         "glm",
         "kimi",
         "ollama",

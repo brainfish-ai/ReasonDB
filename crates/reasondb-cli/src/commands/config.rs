@@ -75,7 +75,7 @@ fn default_db_path() -> String {
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct LLMConfig {
-    /// LLM provider (openai, anthropic, gemini, cohere, glm, kimi, ollama, vertex, bedrock)
+    /// LLM provider (openai, anthropic, gemini, glm, kimi, ollama, vertex, bedrock)
     #[serde(default)]
     pub provider: Option<String>,
 
@@ -243,7 +243,7 @@ pub enum LlmConfigCommands {
 
     /// Replace both ingestion and retrieval config (JSON body from stdin or args)
     Set {
-        /// Provider name (openai, anthropic, gemini, cohere, glm, kimi, ollama, vertex, bedrock)
+        /// Provider name (openai, anthropic, gemini, glm, kimi, ollama, vertex, bedrock)
         #[arg(long)]
         provider: String,
         /// API key
@@ -602,14 +602,13 @@ async fn init_interactive() -> Result<()> {
     println!("  1. Anthropic (Claude)");
     println!("  2. OpenAI (GPT-4)");
     println!("  3. Google (Gemini)");
-    println!("  4. Cohere");
-    println!("  5. GLM (Zhipu AI)");
-    println!("  6. Kimi (Moonshot)");
-    println!("  7. Ollama (local)");
-    println!("  8. Google Vertex AI");
-    println!("  9. AWS Bedrock");
-    println!("  10. Skip (use mock provider)");
-    print!("\nSelect provider [1-10]: ");
+    println!("  4. GLM (Zhipu AI)");
+    println!("  5. Kimi (Moonshot)");
+    println!("  6. Ollama (local)");
+    println!("  7. Google Vertex AI");
+    println!("  8. AWS Bedrock");
+    println!("  9. Skip (use mock provider)");
+    print!("\nSelect provider [1-9]: ");
     io::stdout().flush()?;
 
     let mut input = String::new();
@@ -619,12 +618,11 @@ async fn init_interactive() -> Result<()> {
         "1" => Some("anthropic"),
         "2" => Some("openai"),
         "3" => Some("gemini"),
-        "4" => Some("cohere"),
-        "5" => Some("glm"),
-        "6" => Some("kimi"),
-        "7" => Some("ollama"),
-        "8" => Some("vertex"),
-        "9" => Some("bedrock"),
+        "4" => Some("glm"),
+        "5" => Some("kimi"),
+        "6" => Some("ollama"),
+        "7" => Some("vertex"),
+        "8" => Some("bedrock"),
         _ => None,
     };
 

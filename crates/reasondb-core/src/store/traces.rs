@@ -11,9 +11,9 @@ impl NodeStore {
     pub fn save_trace(&self, trace: &QueryTrace) -> Result<()> {
         let key = trace.trace_id.as_str();
         tracing::info!(trace_id = %key, table_id = %trace.table_id, "Persisting query trace to store");
-        let value = bincode::serialize(trace).map_err(|e| {
+        let value = serde_json::to_vec(trace).map_err(|e| {
             tracing::error!(trace_id = %key, "Failed to serialize trace: {}", e);
-            e
+            StorageError::Serialization(e.to_string())
         })?;
 
         tracing::debug!(trace_id = %key, bytes = value.len(), "Trace serialized, opening write transaction");
@@ -50,7 +50,8 @@ impl NodeStore {
             return Ok(None);
         };
 
-        let trace = bincode::deserialize(val.value())?;
+        let trace = serde_json::from_slice(val.value())
+            .map_err(|e| StorageError::Deserialization(e.to_string()))?;
         Ok(Some(trace))
     }
 
@@ -67,7 +68,7 @@ impl NodeStore {
             .map_err(|e| StorageError::TableError(e.to_string()))?
         {
             let (_, val) = result.map_err(|e| StorageError::TableError(e.to_string()))?;
-            if let Ok(trace) = bincode::deserialize::<QueryTrace>(val.value()) {
+            if let Ok(trace) = serde_json::from_slice::<QueryTrace>(val.value()) {
                 if trace.table_id == table_id {
                     summaries.push(QueryTraceSummary::from(&trace));
                 }

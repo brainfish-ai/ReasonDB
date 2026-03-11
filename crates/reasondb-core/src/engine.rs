@@ -146,6 +146,11 @@ impl<R: ReasoningEngine + 'static> SearchEngine<R> {
         }
     }
 
+    /// Access the underlying node store.
+    pub fn store(&self) -> &Arc<NodeStore> {
+        &self.store
+    }
+
     /// Execute a search query starting from a root node
     #[instrument(skip(self), fields(query = %query, root_id = %root_id))]
     pub async fn search(&self, query: &str, root_id: &str) -> Result<SearchResponse> {

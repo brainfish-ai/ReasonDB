@@ -455,6 +455,7 @@ export interface DomainContextTrace {
   table_name: string
   description?: string
   vocab_hints: string[]
+  context_hints?: Record<string, string>
 }
 
 export interface DecompositionTrace {
@@ -663,6 +664,25 @@ export interface ApiError {
 
 // ==================== API Client ====================
 
+/**
+ * Returns true when a GET response should not be cached:
+ * - null / undefined
+ * - empty array []
+ * - object whose primary collection field (tables, documents, results, etc.) is an empty array
+ */
+function isEmptyResponse(data: unknown): boolean {
+  if (data === null || data === undefined) return true
+  if (Array.isArray(data)) return data.length === 0
+  if (typeof data === 'object') {
+    const collectionKeys = ['tables', 'documents', 'results', 'nodes', 'rows', 'jobs', 'traces']
+    for (const key of collectionKeys) {
+      const val = (data as Record<string, unknown>)[key]
+      if (Array.isArray(val) && val.length === 0) return true
+    }
+  }
+  return false
+}
+
 class ReasonDBClient {
   private baseUrl: string
   private apiKey?: string
@@ -726,7 +746,9 @@ class ReasonDBClient {
     const data = await response.json() as T
     
     if (method === 'GET') {
-      requestCache.set(this.baseUrl, endpoint, data, options)
+      if (!isEmptyResponse(data)) {
+        requestCache.set(this.baseUrl, endpoint, data, options)
+      }
     } else {
       requestCache.invalidate(method, endpoint)
     }
@@ -1242,11 +1264,13 @@ class ReasonDBClient {
   }
 
   /**
-   * Test both ingestion and retrieval LLM connectivity
+   * Test both ingestion and retrieval LLM connectivity.
+   * Pass the current (possibly unsaved) settings to test them without persisting.
    */
-  async testLlmConfig(): Promise<LlmTestResult> {
+  async testLlmConfig(settings?: PatchLlmSettings): Promise<LlmTestResult> {
     return this.request<LlmTestResult>('/v1/config/llm/test', {
       method: 'POST',
+      body: settings ? JSON.stringify(settings) : undefined,
     })
   }
 

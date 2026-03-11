@@ -196,6 +196,12 @@ pub struct QueryDocumentMatch {
     /// Confidence score from LLM (for REASON queries)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f32>,
+
+    /// Document-level summary (from the root node). Placed here rather than on each
+    /// matched node so the response preserves a clean tree: one summary per document,
+    /// consumed by answer-generation clients to provide broader context.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document_summary: Option<String>,
 }
 
 impl From<DocumentMatch> for QueryDocumentMatch {
@@ -212,6 +218,7 @@ impl From<DocumentMatch> for QueryDocumentMatch {
             highlights: m.highlights,
             matched_nodes: m.matched_nodes.into_iter().map(|n| n.into()).collect(),
             confidence: m.confidence,
+            document_summary: m.document_summary,
         }
     }
 }
@@ -458,6 +465,16 @@ async fn execute_select_query<R: ReasoningEngine + Send + Sync + 'static>(
     use std::time::Instant;
 
     if let Some(ref reason_clause) = query.reason {
+        // Reject immediately if the retrieval LLM is known to be unhealthy.
+        if !state.reasoner.is_retrieval_healthy() {
+            return Err(ApiError::ServiceUnavailable(
+                "LLM retrieval provider is currently unhealthy. \
+                 Verify your LLM configuration with POST /v1/config/llm/test. \
+                 The provider will auto-recover in up to 60 seconds after the issue is resolved."
+                    .to_string(),
+            ));
+        }
+
         // Check cache first for REASON queries
         if let Some(cached) = state
             .query_cache
@@ -499,6 +516,7 @@ async fn execute_select_query<R: ReasoningEngine + Send + Sync + 'static>(
                         matched_nodes,
                         highlights: m.highlights.clone(),
                         confidence: Some(m.confidence),
+                        document_summary: None,
                     }
                 })
                 .collect();
@@ -646,6 +664,22 @@ pub async fn execute_query_stream<R: ReasoningEngine + Clone + Send + Sync + 'st
     };
 
     if let Some(reason_clause) = query.reason.clone() {
+        // Reject immediately if the retrieval LLM is known to be unhealthy.
+        if !state.reasoner.is_retrieval_healthy() {
+            let err_event = Event::default()
+                .event("error")
+                .json_data(serde_json::json!({
+                    "error": "LLM retrieval provider is currently unhealthy. \
+                              Verify your LLM configuration with POST /v1/config/llm/test. \
+                              The provider will auto-recover in up to 60 seconds after the issue is resolved."
+                }))
+                .unwrap_or_else(|_| Event::default().event("error").data("LLM unhealthy"));
+            let _ = sse_tx.send(err_event).await;
+            drop(sse_tx);
+            let stream = ReceiverStream::new(sse_rx).map(Ok::<_, Infallible>);
+            return Ok(Sse::new(stream));
+        }
+
         // Check cache first
         if let Some(cached) = state
             .query_cache
@@ -686,6 +720,7 @@ pub async fn execute_query_stream<R: ReasoningEngine + Clone + Send + Sync + 'st
                         matched_nodes,
                         highlights: m.highlights.clone(),
                         confidence: Some(m.confidence),
+                        document_summary: None,
                     }
                 })
                 .collect();

@@ -41,7 +41,6 @@ export function useDocuments(tableId: string) {
     totalDocuments,
     pageSize,
     documentsError,
-    tables,
     setDocuments,
     selectDocument,
     setLoadingDocuments,
@@ -49,7 +48,6 @@ export function useDocuments(tableId: string) {
   } = useTableStore()
 
   const activeConnection = connections.find(c => c.id === activeConnectionId)
-  const currentTable = tables.find(t => t.id === tableId)
 
   const fetchDocuments = useCallback(async (forceRefresh: boolean = false) => {
     if (!activeConnection || !tableId) return
@@ -69,19 +67,25 @@ export function useDocuments(tableId: string) {
       const response = await client.getTableDocuments(tableId, { forceRefresh })
       const storeDocs = response.documents.map(apiDocumentToStoreDocument)
       setDocuments(storeDocs, response.total)
-      
-      // Fetch metadata schema from server for autocompletion
-      // Force refresh if explicitly requested, otherwise only once per table
+
+      // Sync sidebar document_count without subscribing to `tables` (avoids
+      // infinite loop: updateTable → tables ref changes → useCallback rebuilds
+      // → useEffect re-fires → fetchDocuments again).
+      useTableStore.getState().updateTable(tableId, { document_count: response.total })
+
+      // Fetch metadata schema for autocompletion — read table name from store
+      // state directly for the same reason (no subscription dependency).
       const shouldFetchSchema = forceRefresh || !fetchedSchemas.has(tableId)
-      if (currentTable && shouldFetchSchema) {
-        fetchedSchemas.add(tableId) // Mark as fetched before request to prevent race conditions
-        try {
-          const schemaResponse = await client.getTableMetadataSchema(tableId, forceRefresh)
-          updateTableMetadataFieldsFromSchema(currentTable.name, schemaResponse.fields)
-        } catch (schemaError) {
-          // Schema endpoint might not exist on older servers, fail silently
-          // Remove from set so it can be retried later
-          fetchedSchemas.delete(tableId)
+      if (shouldFetchSchema) {
+        const currentTable = useTableStore.getState().tables.find(t => t.id === tableId)
+        if (currentTable) {
+          fetchedSchemas.add(tableId)
+          try {
+            const schemaResponse = await client.getTableMetadataSchema(tableId, forceRefresh)
+            updateTableMetadataFieldsFromSchema(currentTable.name, schemaResponse.fields)
+          } catch {
+            fetchedSchemas.delete(tableId)
+          }
         }
       }
     } catch (error) {
@@ -91,7 +95,7 @@ export function useDocuments(tableId: string) {
     } finally {
       setLoadingDocuments(false)
     }
-  }, [activeConnection, tableId, currentTable, setLoadingDocuments, setDocuments, setDocumentsError])
+  }, [activeConnection, tableId, setLoadingDocuments, setDocuments, setDocumentsError])
 
   // Load documents when table is selected
   useEffect(() => {
