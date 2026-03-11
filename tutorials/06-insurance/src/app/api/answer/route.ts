@@ -5,6 +5,12 @@ interface ContextNode {
   path?: string[]
 }
 
+interface DocumentGroup {
+  title: string
+  document_summary?: string
+  nodes: ContextNode[]
+}
+
 const SYSTEM_PROMPT = `You are an insurance policy expert delivering clear, authoritative answers about insurance coverage, exclusions, and policy terms.
 
 CITATION RULES (mandatory):
@@ -22,15 +28,24 @@ STYLE RULES:
 - Use bullet points when listing multiple conditions, exclusions, or benefit types.
 - Do not contradict the source material or add outside facts.`
 
-function buildPrompt(question: string, context: ContextNode[]): string {
-  const contextBlock = context
-    .map((node, i) => {
-      const path = node.path?.join(" > ") ?? node.title
-      return `[Source ${i + 1}] ${path} (confidence: ${(node.confidence * 100).toFixed(0)}%)\n${node.content}`
-    })
-    .join("\n\n---\n\n")
+function buildPrompt(question: string, documents: DocumentGroup[]): string {
+  let sourceIndex = 1
+  const docBlocks = documents.map((doc) => {
+    const summaryLine = doc.document_summary
+      ? `Document summary: ${doc.document_summary}\n`
+      : ""
+    const nodeBlocks = doc.nodes
+      .map((node) => {
+        const path = node.path?.join(" > ") ?? node.title
+        const block = `[Source ${sourceIndex}] ${path} (confidence: ${(node.confidence * 100).toFixed(0)}%)\n${node.content}`
+        sourceIndex++
+        return block
+      })
+      .join("\n\n")
+    return `=== ${doc.title} ===\n${summaryLine}${nodeBlocks}`
+  })
 
-  return `Context:\n\n${contextBlock}\n\n---\n\nQuestion: ${question}`
+  return `Context:\n\n${docBlocks.join("\n\n---\n\n")}\n\n---\n\nQuestion: ${question}`
 }
 
 export async function POST(req: Request) {
@@ -40,15 +55,15 @@ export async function POST(req: Request) {
   }
 
   let question: string
-  let context: ContextNode[]
+  let documents: DocumentGroup[]
   let requestedModel: string | undefined
   try {
     const body = await req.json()
     question = body.question
-    context = body.context
+    documents = body.documents
     requestedModel = body.model
-    if (!question || !Array.isArray(context) || context.length === 0) {
-      return Response.json({ error: "question and context are required" }, { status: 400 })
+    if (!question || !Array.isArray(documents) || documents.length === 0) {
+      return Response.json({ error: "question and documents are required" }, { status: 400 })
     }
   } catch {
     return Response.json({ error: "Invalid request body" }, { status: 400 })
@@ -70,7 +85,7 @@ export async function POST(req: Request) {
         stream: true,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: buildPrompt(question, context) },
+          { role: "user", content: buildPrompt(question, documents) },
         ],
       }),
     })

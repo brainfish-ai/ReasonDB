@@ -141,6 +141,12 @@ export const useTableStore = create<TableState>((set, get) => ({
     documents: state.documents.filter((d) => d.id !== id),
     totalDocuments: state.totalDocuments - 1,
     selectedDocumentId: state.selectedDocumentId === id ? null : state.selectedDocumentId,
+    // Keep the sidebar count in sync with the document list.
+    tables: state.tables.map((t) =>
+      t.id === state.selectedTableId
+        ? { ...t, document_count: Math.max(0, t.document_count - 1) }
+        : t
+    ),
   })),
   
   setPage: (currentPage) => set({ currentPage }),

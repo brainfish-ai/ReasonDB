@@ -10,6 +10,7 @@ export interface DomainContextTrace {
   table_name: string
   description?: string
   vocab_hints: string[]
+  context_hints?: Record<string, string>
 }
 
 export interface DecompositionTrace {
@@ -130,11 +131,26 @@ export interface MatchedNode {
   reasoning_trace?: Array<{ node_title: string; decision: string; confidence: number }>
 }
 
+/** A document together with its matched nodes — the tree unit in REASON results. */
+export interface DocumentResult {
+  id: string
+  title: string
+  document_summary?: string
+  matched_nodes: MatchedNode[]
+  confidence?: number
+}
+
 export interface QueryResult {
   rows: Record<string, unknown>[]
   columns: string[]
   rowCount: number
   executionTimeMs: number
+  /** Tree-structured results: one entry per matched document, each carrying its
+   *  document_summary and the nodes matched within it. Used for context-rich
+   *  answer generation. */
+  matchedDocuments?: DocumentResult[]
+  /** Flat list of all matched nodes across documents — kept for display (citation
+   *  badges, source pills). Derived from matchedDocuments. */
   matchedNodes?: MatchedNode[]
   question?: string
   trace_id?: string
@@ -291,22 +307,34 @@ export class ReasonDBClient {
 
   private transformResponse(data: QueryServerResponse, query?: string): QueryResult {
     if (data.documents && data.documents.length > 0) {
+      const matchedDocuments: DocumentResult[] = []
       const matchedNodes: MatchedNode[] = []
+
       for (const doc of data.documents) {
         const nodes = doc.matched_nodes
-        if (Array.isArray(nodes)) {
+        if (Array.isArray(nodes) && nodes.length > 0) {
+          const docResult: DocumentResult = {
+            id: doc.id as string,
+            title: doc.title as string,
+            document_summary: doc.document_summary as string | undefined,
+            matched_nodes: nodes as MatchedNode[],
+            confidence: doc.confidence as number | undefined,
+          }
+          matchedDocuments.push(docResult)
           for (const n of nodes) {
             matchedNodes.push(n as MatchedNode)
           }
         }
       }
+
       return {
         columns: Object.keys(data.documents[0]),
         rows: data.documents,
         rowCount: data.total_count ?? data.documents.length,
         executionTimeMs: data.execution_time_ms,
         trace_id: data.trace_id,
-        ...(matchedNodes.length > 0 && {
+        ...(matchedDocuments.length > 0 && {
+          matchedDocuments,
           matchedNodes,
           question: query ? extractReasonQuestion(query) : undefined,
         }),

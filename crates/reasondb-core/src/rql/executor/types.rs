@@ -58,6 +58,10 @@ pub struct DocumentMatch {
     pub highlights: Vec<String>,
     /// Confidence score from LLM (for REASON queries)
     pub confidence: Option<f32>,
+    /// Summary of the document (from the root node), included at the document level
+    /// so downstream consumers can provide document-level context without repeating
+    /// the summary on every individual matched node.
+    pub document_summary: Option<String>,
 }
 
 /// Query execution statistics for analysis and optimization.

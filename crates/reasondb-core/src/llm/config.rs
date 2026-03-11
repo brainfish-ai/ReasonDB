@@ -37,7 +37,7 @@ pub struct LlmOptions {
 /// Configuration for a single LLM model (provider + credentials + options)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmModelConfig {
-    /// Provider name: "openai", "anthropic", "gemini", "cohere", "glm", "kimi", "ollama", "vertex", "bedrock"
+    /// Provider name: "openai", "anthropic", "gemini", "glm", "kimi", "ollama", "vertex", "bedrock"
     pub provider: String,
     /// API key (not required for Ollama)
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -88,15 +88,6 @@ impl LlmModelConfig {
                 Ok(LLMProvider::Gemini {
                     api_key: key,
                     model: model_or("gemini-1.5-flash"),
-                })
-            }
-            "cohere" => {
-                let key = self.api_key.clone().ok_or_else(|| {
-                    ReasonError::Config("Cohere requires an API key".into())
-                })?;
-                Ok(LLMProvider::Cohere {
-                    api_key: key,
-                    model: model_or("command-r-plus"),
                 })
             }
             "glm" => {
@@ -154,7 +145,7 @@ impl LlmModelConfig {
                 })
             }
             other => Err(ReasonError::Config(format!(
-                "Unknown LLM provider: '{}'. Supported: openai, anthropic, gemini, cohere, glm, kimi, ollama, vertex, bedrock",
+                "Unknown LLM provider: '{}'. Supported: openai, anthropic, gemini, glm, kimi, ollama, vertex, bedrock",
                 other
             ))),
         }
@@ -202,14 +193,6 @@ impl From<&LLMProvider> for LlmModelConfig {
             },
             LLMProvider::Gemini { api_key, model } => Self {
                 provider: "gemini".into(),
-                api_key: Some(api_key.clone()),
-                model: Some(model.clone()),
-                base_url: None,
-                region: None,
-                options: LlmOptions::default(),
-            },
-            LLMProvider::Cohere { api_key, model } => Self {
-                provider: "cohere".into(),
                 api_key: Some(api_key.clone()),
                 model: Some(model.clone()),
                 base_url: None,

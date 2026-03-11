@@ -42,7 +42,8 @@ impl NodeStore {
         }
 
         let key = table.id.as_str();
-        let value = bincode::serialize(table)?;
+        let value =
+            serde_json::to_vec(table).map_err(|e| ReasonError::Serialization(e.to_string()))?;
 
         let write_txn = self.db.begin_write().map_err(StorageError::from)?;
         {
@@ -81,7 +82,8 @@ impl NodeStore {
             .map_err(|e| StorageError::TableError(e.to_string()))?
         {
             Some(value) => {
-                let t: Table = bincode::deserialize(value.value())?;
+                let t: Table = serde_json::from_slice(value.value())
+                    .map_err(|e| ReasonError::Serialization(e.to_string()))?;
                 Ok(Some(t))
             }
             None => Ok(None),
@@ -184,7 +186,8 @@ impl NodeStore {
         }
 
         let key = table.id.as_str();
-        let value = bincode::serialize(table)?;
+        let value =
+            serde_json::to_vec(table).map_err(|e| ReasonError::Serialization(e.to_string()))?;
 
         let write_txn = self.db.begin_write().map_err(StorageError::from)?;
         {
@@ -286,7 +289,8 @@ impl NodeStore {
             .map_err(|e| StorageError::TableError(e.to_string()))?
         {
             let (_, value) = result.map_err(|e| StorageError::TableError(e.to_string()))?;
-            let t: Table = bincode::deserialize(value.value())?;
+            let t: Table = serde_json::from_slice(value.value())
+                .map_err(|e| ReasonError::Serialization(e.to_string()))?;
             tables.push(t);
         }
         Ok(tables)

@@ -1,7 +1,7 @@
 //! LLM Interface for ReasonDB
 //!
 //! This module defines the `ReasoningEngine` trait that abstracts LLM interactions.
-//! Supports multiple providers: OpenAI, Anthropic, Gemini, Cohere, GLM (Zhipu AI),
+//! Supports multiple providers: OpenAI, Anthropic, Gemini, GLM (Zhipu AI),
 //! Kimi (Moonshot AI), and Ollama (local models).
 
 pub mod config;
@@ -176,7 +176,11 @@ pub struct DomainVocabResult {
 /// A single chunk group identified by the LLM during agentic chunking.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ChunkGroup {
-    /// 1-based start line number (inclusive)
+    /// 1-based start line number (inclusive).
+    /// `#[serde(default)]` allows models that omit this field (e.g. Gemini with
+    /// thinkingBudget:0) to still deserialize; `chunk_document` repairs 0-values
+    /// by inferring contiguous boundaries from the `end_line` sequence.
+    #[serde(default)]
     pub start_line: usize,
     /// 1-based end line number (inclusive)
     pub end_line: usize,
@@ -490,6 +494,36 @@ pub trait ReasoningEngine: Send + Sync {
 
     /// Get the name of this reasoning engine (for logging/debugging)
     fn name(&self) -> &str;
+
+    // ---------------------------------------------------------------
+    // Health tracking
+    //
+    // Default implementations assume the engine is always healthy
+    // (suitable for test doubles and single-Reasoner wrappers).
+    // `DynamicReasoner` overrides these with real state tracking.
+    // ---------------------------------------------------------------
+
+    /// Returns `true` if the ingestion LLM (summarization) is considered healthy.
+    fn is_ingestion_healthy(&self) -> bool {
+        true
+    }
+
+    /// Returns `true` if the retrieval LLM (REASON queries) is considered healthy.
+    fn is_retrieval_healthy(&self) -> bool {
+        true
+    }
+
+    /// Record that the ingestion LLM has become unhealthy (e.g. timeout).
+    fn mark_ingestion_unhealthy(&self) {}
+
+    /// Record that the retrieval LLM has become unhealthy (e.g. timeout).
+    fn mark_retrieval_unhealthy(&self) {}
+
+    /// Reset ingestion LLM health to healthy (e.g. after a successful test).
+    fn mark_ingestion_healthy(&self) {}
+
+    /// Reset retrieval LLM health to healthy (e.g. after a successful test).
+    fn mark_retrieval_healthy(&self) {}
 }
 
 /// Configuration for the reasoning engine

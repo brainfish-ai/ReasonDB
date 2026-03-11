@@ -4,7 +4,6 @@
 //! - OpenAI (GPT-4o, GPT-4o-mini, etc.)
 //! - Anthropic (Claude 3.5 Sonnet, Claude 3 Haiku, etc.)
 //! - Google Gemini
-//! - Cohere
 //! - GLM (Zhipu AI — GLM-4, GLM-4-Flash, etc.)
 //! - Kimi (Moonshot AI — moonshot-v1-8k, moonshot-v1-128k, etc.)
 //! - Ollama (local models — Llama, Qwen, Mistral, etc.)
@@ -14,6 +13,7 @@
 //! Uses structured output extraction via `schemars::JsonSchema`.
 
 use async_trait::async_trait;
+use reqwest::Client as ReqwestClient;
 use rig::completion::Prompt;
 use serde::Serialize;
 use tracing::{debug, error, info, warn};
@@ -144,8 +144,6 @@ pub enum LLMProvider {
     Anthropic { api_key: String, model: String },
     /// Google Gemini models
     Gemini { api_key: String, model: String },
-    /// Cohere models
-    Cohere { api_key: String, model: String },
     /// Zhipu AI GLM models (OpenAI-compatible API)
     Glm { api_key: String, model: String },
     /// Moonshot AI Kimi models (OpenAI-compatible API)
@@ -216,14 +214,6 @@ impl LLMProvider {
         Self::Gemini {
             api_key: api_key.into(),
             model: "gemini-2.5-pro".to_string(),
-        }
-    }
-
-    /// Create a Cohere provider
-    pub fn cohere(api_key: impl Into<String>) -> Self {
-        Self::Cohere {
-            api_key: api_key.into(),
-            model: "command-r-plus".to_string(),
         }
     }
 
@@ -302,7 +292,6 @@ impl LLMProvider {
             Self::OpenAI { .. } => "openai",
             Self::Anthropic { .. } => "anthropic",
             Self::Gemini { .. } => "gemini",
-            Self::Cohere { .. } => "cohere",
             Self::Glm { .. } => "glm",
             Self::Kimi { .. } => "kimi",
             Self::Ollama { .. } => "ollama",
@@ -317,7 +306,6 @@ impl LLMProvider {
             Self::OpenAI { model, .. }
             | Self::Anthropic { model, .. }
             | Self::Gemini { model, .. }
-            | Self::Cohere { model, .. }
             | Self::Glm { model, .. }
             | Self::Kimi { model, .. }
             | Self::Ollama { model, .. }
@@ -536,30 +524,129 @@ impl Reasoner {
                 }
             }
             LLMProvider::Gemini { api_key, model } => {
-                let client = rig::providers::gemini::Client::new(api_key);
-                let mut builder = client.extractor::<T>(model);
-                if let Some(preamble) = &self.options.system_prompt {
-                    builder = builder.preamble(preamble);
-                }
-                let extractor = builder.build();
+                // rig-core 0.6.1's Gemini extractor uses function calling which is broken:
+                // parameters are dropped (TODO comment in rig source) and the tool struct
+                // uses singular `functionDeclaration` instead of the plural array the API
+                // expects — causing consistent HTTP 400 errors.
+                // Use a direct API call with responseMimeType + schema-in-prompt instead.
+                let schema = schemars::schema_for!(T);
+                let schema_json = serde_json::to_string_pretty(&schema)
+                    .map_err(|e| ReasonError::Reasoning(format!("Schema error: {}", e)))?;
 
-                extractor
-                    .extract(prompt)
-                    .await
-                    .map_err(|e| ReasonError::Reasoning(format!("Gemini extraction error: {}", e)))
-            }
-            LLMProvider::Cohere { api_key, model } => {
-                let client = rig::providers::cohere::Client::new(api_key);
-                let mut builder = client.extractor::<T>(model);
-                if let Some(preamble) = &self.options.system_prompt {
-                    builder = builder.preamble(preamble);
-                }
-                let extractor = builder.build();
+                let default_preamble = "You are a JSON extraction assistant. Always respond with valid JSON only, no other text.";
+                let preamble = self
+                    .options
+                    .system_prompt
+                    .as_deref()
+                    .unwrap_or(default_preamble);
 
-                extractor
-                    .extract(prompt)
+                let extraction_prompt = format!(
+                    "Extract the following information and return ONLY valid JSON matching this schema.\n\
+                    IMPORTANT: When the schema has an array of objects, return EACH item as a SEPARATE object in the array.\n\n\
+                    Schema:\n{}\n\nText:\n{}",
+                    schema_json, prompt
+                );
+
+                // thinkingBudget: 0 disables the thinking phase on gemini-2.5-flash.
+                // Without this, the model burns 2,500-4,000 tokens on reasoning before
+                // producing any visible output, exhausting the maxOutputTokens budget and
+                // truncating the JSON response. Structured extraction needs no deep reasoning.
+                let request_body = serde_json::json!({
+                    "contents": [{
+                        "parts": [{"text": extraction_prompt}],
+                        "role": "user"
+                    }],
+                    "systemInstruction": {
+                        "parts": [{"text": preamble}],
+                        "role": "user"
+                    },
+                    "generationConfig": {
+                        "responseMimeType": "application/json",
+                        "maxOutputTokens": self.effective_max_tokens(8192),
+                        "thinkingConfig": {
+                            "thinkingBudget": 0
+                        }
+                    }
+                });
+
+                let http_client = ReqwestClient::new();
+                let response = http_client
+                    .post(format!(
+                        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+                        model, api_key
+                    ))
+                    .json(&request_body)
+                    .send()
                     .await
-                    .map_err(|e| ReasonError::Reasoning(format!("Cohere extraction error: {}", e)))
+                    .map_err(|e| ReasonError::Reasoning(format!("Gemini HTTP error: {}", e)))?;
+
+                if !response.status().is_success() {
+                    let status = response.status();
+                    let body = response.text().await.unwrap_or_default();
+                    return Err(ReasonError::Reasoning(format!(
+                        "Gemini extraction error: PromptError: CompletionError: HttpError: HTTP status client error ({}) for url ({}/v1beta/models/{}:generateContent): {}",
+                        status, "https://generativelanguage.googleapis.com", model, body
+                    )));
+                }
+
+                let response_json: serde_json::Value = response.json().await.map_err(|e| {
+                    ReasonError::Reasoning(format!("Gemini response parse error: {}", e))
+                })?;
+
+                let finish_reason = response_json["candidates"][0]["finishReason"]
+                    .as_str()
+                    .unwrap_or("unknown");
+                let prompt_tokens = response_json["usageMetadata"]["promptTokenCount"]
+                    .as_u64()
+                    .unwrap_or(0);
+                let candidates_tokens = response_json["usageMetadata"]["candidatesTokenCount"]
+                    .as_u64()
+                    .unwrap_or(0);
+                let thoughts_tokens = response_json["usageMetadata"]["thoughtsTokenCount"]
+                    .as_u64()
+                    .unwrap_or(0);
+                let total_tokens = response_json["usageMetadata"]["totalTokenCount"]
+                    .as_u64()
+                    .unwrap_or(0);
+                info!(
+                    finish_reason,
+                    prompt_tokens,
+                    candidates_tokens,
+                    thoughts_tokens,
+                    total_tokens,
+                    "Gemini extraction response"
+                );
+                if finish_reason == "MAX_TOKENS" {
+                    warn!(
+                        prompt_tokens,
+                        candidates_tokens,
+                        thoughts_tokens,
+                        max_output_tokens = self.effective_max_tokens(8192),
+                        "Gemini hit MAX_TOKENS — response will be truncated"
+                    );
+                }
+
+                let text = response_json["candidates"][0]["content"]["parts"][0]["text"]
+                    .as_str()
+                    .ok_or_else(|| {
+                        ReasonError::Reasoning(format!(
+                            "No text in Gemini response: {}",
+                            response_json
+                                .to_string()
+                                .chars()
+                                .take(500)
+                                .collect::<String>()
+                        ))
+                    })?;
+
+                let json_str = extract_json_from_response(text);
+                serde_json::from_str(json_str).map_err(|e| {
+                    ReasonError::Reasoning(format!(
+                        "Failed to parse Gemini JSON response: {}. Response was: {}",
+                        e,
+                        json_str.chars().take(500).collect::<String>()
+                    ))
+                })
             }
             LLMProvider::Glm { api_key, model } => {
                 let client = rig::providers::openai::Client::from_url(
@@ -764,22 +851,98 @@ impl Reasoner {
                 })
             }
             LLMProvider::Gemini { api_key, model } => {
-                let client = rig::providers::gemini::Client::new(api_key);
-                let agent = self.apply_agent_options(client.agent(model)).build();
+                // Direct HTTP call — same pattern as `extract` — so we can read
+                // usageMetadata and log token counts at INFO level.
+                let preamble = self
+                    .options
+                    .system_prompt
+                    .as_deref()
+                    .unwrap_or("You are a helpful assistant.");
 
-                agent
-                    .prompt(prompt)
-                    .await
-                    .map_err(|e| ReasonError::Reasoning(format!("Gemini completion error: {}", e)))
-            }
-            LLMProvider::Cohere { api_key, model } => {
-                let client = rig::providers::cohere::Client::new(api_key);
-                let agent = self.apply_agent_options(client.agent(model)).build();
+                let mut generation_config = serde_json::json!({
+                    "maxOutputTokens": self.effective_max_tokens(4096),
+                    "thinkingConfig": { "thinkingBudget": 0 }
+                });
+                if let Some(temp) = self.effective_temperature() {
+                    generation_config["temperature"] = serde_json::json!(temp);
+                }
 
-                agent
-                    .prompt(prompt)
+                let request_body = serde_json::json!({
+                    "contents": [{ "parts": [{"text": prompt}], "role": "user" }],
+                    "systemInstruction": { "parts": [{"text": preamble}], "role": "user" },
+                    "generationConfig": generation_config
+                });
+
+                let http_client = ReqwestClient::new();
+                let response = http_client
+                    .post(format!(
+                        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+                        model, api_key
+                    ))
+                    .json(&request_body)
+                    .send()
                     .await
-                    .map_err(|e| ReasonError::Reasoning(format!("Cohere completion error: {}", e)))
+                    .map_err(|e| ReasonError::Reasoning(format!("Gemini HTTP error: {}", e)))?;
+
+                if !response.status().is_success() {
+                    let status = response.status();
+                    let body = response.text().await.unwrap_or_default();
+                    return Err(ReasonError::Reasoning(format!(
+                        "Gemini completion error: HTTP {} — {}",
+                        status, body
+                    )));
+                }
+
+                let response_json: serde_json::Value = response.json().await.map_err(|e| {
+                    ReasonError::Reasoning(format!("Gemini response parse error: {}", e))
+                })?;
+
+                let finish_reason = response_json["candidates"][0]["finishReason"]
+                    .as_str()
+                    .unwrap_or("unknown");
+                let prompt_tokens = response_json["usageMetadata"]["promptTokenCount"]
+                    .as_u64()
+                    .unwrap_or(0);
+                let candidates_tokens = response_json["usageMetadata"]["candidatesTokenCount"]
+                    .as_u64()
+                    .unwrap_or(0);
+                let thoughts_tokens = response_json["usageMetadata"]["thoughtsTokenCount"]
+                    .as_u64()
+                    .unwrap_or(0);
+                let total_tokens = response_json["usageMetadata"]["totalTokenCount"]
+                    .as_u64()
+                    .unwrap_or(0);
+                info!(
+                    finish_reason,
+                    prompt_tokens,
+                    candidates_tokens,
+                    thoughts_tokens,
+                    total_tokens,
+                    "Gemini completion response"
+                );
+                if finish_reason == "MAX_TOKENS" {
+                    warn!(
+                        prompt_tokens,
+                        candidates_tokens,
+                        thoughts_tokens,
+                        max_output_tokens = self.effective_max_tokens(4096),
+                        "Gemini hit MAX_TOKENS — completion response will be truncated"
+                    );
+                }
+
+                response_json["candidates"][0]["content"]["parts"][0]["text"]
+                    .as_str()
+                    .ok_or_else(|| {
+                        ReasonError::Reasoning(format!(
+                            "No text in Gemini completion response: {}",
+                            response_json
+                                .to_string()
+                                .chars()
+                                .take(500)
+                                .collect::<String>()
+                        ))
+                    })
+                    .map(|s| s.to_string())
             }
             LLMProvider::Glm { api_key, model } => {
                 let client = rig::providers::openai::Client::from_url(
@@ -1303,35 +1466,42 @@ Format: {{"rankings": [{{"document_id": "...", "relevance": 0.9}}]}}"#,
             .map(|ctx| format!("Document collection: \"{}\"\n", ctx.table_name))
             .unwrap_or_default();
 
+        let context_hints_line = domain_context
+            .filter(|ctx| !ctx.context_hints.is_empty())
+            .map(|ctx| {
+                let entries: Vec<String> = ctx
+                    .context_hints
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect();
+                format!("Domain context: {}\n", entries.join(", "))
+            })
+            .unwrap_or_default();
+
         let prompt = format!(
             r#"You are a search query expert. A user is searching a document collection and may not know the domain-specific terminology used in the documents.
 
-{table_name_line}{description_line}{vocab_line}
+{table_name_line}{description_line}{context_hints_line}{vocab_line}
 User query: "{query}"
 
-Generate 3 alternative search queries that:
-1. Preserve the original intent
-2. Use domain-specific terminology and jargon from the collection
-3. Cover different aspects or phrasings of the question
-4. Would improve recall against technical documents
+Decide if a single domain-aware reformulation would improve recall:
+- If the query already uses precise domain terminology that maps directly to document content, return an EMPTY array — no reformulation needed.
+- If the query uses natural language or general terms that may not match technical document vocabulary, return exactly ONE alternative phrasing that uses domain-specific terminology.
 
-Include at least one query that closely mirrors the original phrasing.
+The original query is always searched separately. Your job is to provide at most one complementary reformulation that covers what the original would miss.
 
 Return JSON:
-{{"sub_queries": [{{"text": "alternative query text", "rationale": "why this phrasing helps"}}, ...]}}
+{{"sub_queries": [{{"text": "reformulated query", "rationale": "what gap this covers"}}]}}
 
-If the original query already uses precise domain terminology, return fewer alternatives."#,
+Return an empty array if no reformulation is needed: {{"sub_queries": []}}"#,
         );
 
         debug!("Decomposing query: {}", query);
 
         let result: DecomposedQueryResult = self.extract(&prompt).await.unwrap_or_else(|e| {
-            tracing::warn!("Query decomposition failed, using passthrough: {}", e);
+            tracing::warn!("Query decomposition failed, no reformulation added: {}", e);
             DecomposedQueryResult {
-                sub_queries: vec![super::SubQueryItem {
-                    text: query.to_string(),
-                    rationale: "Fallback to original query".to_string(),
-                }],
+                sub_queries: vec![],
             }
         });
 
@@ -1435,7 +1605,7 @@ Return JSON exactly:
             end_line
         );
 
-        let result: ChunkGroupResult = self.extract(&prompt).await.unwrap_or_else(|e| {
+        let mut result: ChunkGroupResult = self.extract(&prompt).await.unwrap_or_else(|e| {
             warn!(
                 "Agentic chunking LLM call failed (falling back to single group): {}",
                 e
@@ -1448,6 +1618,24 @@ Return JSON exactly:
                 }],
             }
         });
+
+        // Repair groups where start_line was omitted by the model (serializes as 0).
+        // Groups are contiguous so start_line[i] = end_line[i-1] + 1, and start_line[0]
+        // = window_offset.
+        let any_missing = result.groups.iter().any(|g| g.start_line == 0);
+        if any_missing {
+            debug!(
+                "Repairing missing start_line values in {} groups",
+                result.groups.len()
+            );
+            let mut next_start = window_offset;
+            for group in &mut result.groups {
+                if group.start_line == 0 {
+                    group.start_line = next_start;
+                }
+                next_start = group.end_line + 1;
+            }
+        }
 
         Ok(result)
     }
@@ -1471,9 +1659,6 @@ mod tests {
 
         let gemini = LLMProvider::gemini("test-key");
         assert!(matches!(gemini, LLMProvider::Gemini { model, .. } if model == "gemini-2.5-flash"));
-
-        let cohere = LLMProvider::cohere("test-key");
-        assert!(matches!(cohere, LLMProvider::Cohere { model, .. } if model == "command-r-plus"));
 
         let glm = LLMProvider::glm("test-key");
         assert!(matches!(glm, LLMProvider::Glm { ref model, .. } if model == "glm-4-flash"));

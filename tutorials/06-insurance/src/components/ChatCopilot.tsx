@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 import ReactMarkdown from "react-markdown"
 import { ArrowUp, Plus, Clock, X, Sparkles, Loader2, Code2, FileText, RefreshCw, ChevronDown } from "lucide-react"
-import type { QueryResult, MatchedNode } from "@/lib/api"
+import type { QueryResult, MatchedNode, DocumentResult } from "@/lib/api"
 import { RqlHighlight } from "@/components/RqlHighlight"
 
 const POLICIES = [
@@ -26,6 +26,10 @@ interface Message {
   contextualQuestion?: string
   status?: "contextualising" | "building" | "running" | "answering" | "done" | "error"
   progressMsg?: string
+  /** Tree-structured results — one entry per document with its summary and nodes.
+   *  Used to build the context sent to the answer LLM. */
+  documents?: DocumentResult[]
+  /** Flat list derived from documents — used for citation badge indexing and source pills. */
   nodes?: MatchedNode[]
   question?: string
   answer?: string
@@ -326,7 +330,7 @@ export function ChatCopilot({
   }, [inputValue])
 
   /** Stream the AI answer from /api/answer directly into the message bubble */
-  const streamAnswer = useCallback(async (msgId: string, question: string, nodes: MatchedNode[]) => {
+  const streamAnswer = useCallback(async (msgId: string, question: string, documents: DocumentResult[]) => {
     if (answerAbortRef.current) answerAbortRef.current.abort()
     const ctrl = new AbortController()
     answerAbortRef.current = ctrl
@@ -343,11 +347,17 @@ export function ChatCopilot({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           question,
-          context: nodes.map((n) => ({
-            title: n.title,
-            content: n.content,
-            confidence: n.confidence,
-            path: n.path,
+          // Pass the tree: each document with its summary + its matched nodes.
+          // The answer API groups sources by document for richer context.
+          documents: documents.map((doc) => ({
+            title: doc.title,
+            document_summary: doc.document_summary,
+            nodes: doc.matched_nodes.map((n) => ({
+              title: n.title,
+              content: n.content,
+              confidence: n.confidence,
+              path: n.path,
+            })),
           })),
           ...(selectedModel ? { model: selectedModel } : {}),
         }),
@@ -417,22 +427,23 @@ export function ChatCopilot({
 
     // Query finished — result arrived
     if (!isRunning && prevRunningRef.current && result !== prevResultRef.current) {
+      const documents = result?.matchedDocuments ?? []
       const nodes = result?.matchedNodes ?? []
       // Prefer result.question, fall back to the contextualQuestion stored on the pending message
       const pendingMsg = messagesRef.current.find((m) => m.id === pendingMsgId)
       const question = result?.question || pendingMsg?.contextualQuestion || pendingMsg?.content || ""
 
-      if (nodes.length > 0) {
-        // Store matched nodes in the message, then stream the answer
+      if (documents.length > 0) {
+        // Store tree (documents) + flat (nodes) in the message, then stream the answer
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === pendingMsgId ? { ...m, nodes, question } : m
+            m.id === pendingMsgId ? { ...m, documents, nodes, question } : m
           )
         )
         const msgId = pendingMsgId
         pendingRetryRef.current = null
         setPendingMsgId(null)
-        streamAnswer(msgId, question, nodes)
+        streamAnswer(msgId, question, documents)
       } else if (pendingRetryRef.current) {
         // Already retried with all-policies — still no results
         pendingRetryRef.current = null

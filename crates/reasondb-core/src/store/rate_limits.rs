@@ -7,7 +7,7 @@ use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
 
 use super::{NodeStore, RATE_LIMITS_TABLE};
-use crate::error::{Result, StorageError};
+use crate::error::{ReasonError, Result, StorageError};
 
 /// Serializable snapshot of a rate limit bucket
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,7 +26,7 @@ impl NodeStore {
     /// Save a rate limit snapshot for a client.
     pub fn save_rate_limit(&self, client_key: &str, snapshot: &RateLimitSnapshot) -> Result<()> {
         let data =
-            bincode::serialize(snapshot).map_err(|e| StorageError::Serialization(e.to_string()))?;
+            serde_json::to_vec(snapshot).map_err(|e| ReasonError::Serialization(e.to_string()))?;
 
         let write_txn = self.db.begin_write().map_err(StorageError::from)?;
         {
@@ -54,8 +54,8 @@ impl NodeStore {
                 .map_err(StorageError::from)?;
 
             for (client_key, snapshot) in snapshots {
-                let data = bincode::serialize(snapshot)
-                    .map_err(|e| StorageError::Serialization(e.to_string()))?;
+                let data = serde_json::to_vec(snapshot)
+                    .map_err(|e| ReasonError::Serialization(e.to_string()))?;
                 table
                     .insert(*client_key, data.as_slice())
                     .map_err(|e| StorageError::TableError(e.to_string()))?;
@@ -77,8 +77,8 @@ impl NodeStore {
             .map_err(|e| StorageError::TableError(e.to_string()))?
         {
             Some(value) => {
-                let snapshot: RateLimitSnapshot = bincode::deserialize(value.value())
-                    .map_err(|e| StorageError::Deserialization(e.to_string()))?;
+                let snapshot: RateLimitSnapshot = serde_json::from_slice(value.value())
+                    .map_err(|e| ReasonError::Serialization(e.to_string()))?;
                 Ok(Some(snapshot))
             }
             None => Ok(None),
@@ -99,7 +99,7 @@ impl NodeStore {
 
         for entry in iter {
             let (key, value) = entry.map_err(|e| StorageError::TableError(e.to_string()))?;
-            if let Ok(snapshot) = bincode::deserialize::<RateLimitSnapshot>(value.value()) {
+            if let Ok(snapshot) = serde_json::from_slice::<RateLimitSnapshot>(value.value()) {
                 results.push((key.value().to_string(), snapshot));
             }
         }

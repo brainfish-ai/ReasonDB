@@ -54,8 +54,11 @@ pub struct DomainContextTrace {
     pub table_name: String,
     /// Table description
     pub description: Option<String>,
-    /// Domain vocabulary hints from table metadata
+    /// Domain vocabulary hints from table metadata["domain_vocab"]
     pub vocab_hints: Vec<String>,
+    /// Explicit domain framing hints from table metadata["domain_context"]
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub context_hints: std::collections::HashMap<String, String>,
 }
 
 /// A single sub-query produced by the decomposer.

@@ -9,14 +9,14 @@
 //! Each versioned struct (e.g. `DocumentV1`, `PageNodeV1`) mirrors the exact
 //! field layout of a model at a prior schema version.  A `From<VN> for Current`
 //! impl maps old fields to new ones, filling missing fields with sensible
-//! defaults.  The `deserialize_*` helpers try the current rmp-serde format
-//! first and fall back to bincode + the shadow struct for old records.
+//! defaults.  The `deserialize_*` helpers try the current format first (JSON or
+//! rmp-serde) and fall back to bincode + the shadow struct for old records.
 //!
 //! # Adding a future migration
 //!
 //! 1. Add a new `FooV2` struct that mirrors the current `Foo` fields.
 //! 2. Implement `From<FooV2> for Foo` with defaults for any new fields.
-//! 3. Update `deserialize_foo` to chain: rmp-serde → bincode/V2 → bincode/V1
+//! 3. Update `deserialize_foo` to chain: JSON/rmp-serde → bincode/V2 → bincode/V1
 //!    → error.
 
 use std::collections::HashMap;

@@ -152,6 +152,15 @@ async fn ingest_file_inner<R: ReasoningEngine + Clone + Send + Sync + 'static>(
     data: Vec<u8>,
     raw_table_id: String,
 ) -> ApiResult<Json<JobStatusResponse>> {
+    if !state.reasoner.is_ingestion_healthy() {
+        return Err(ApiError::ServiceUnavailable(
+            "LLM ingestion provider is currently unhealthy. \
+             Verify your LLM configuration with POST /v1/config/llm/test. \
+             The provider will auto-recover in up to 60 seconds after the issue is resolved."
+                .to_string(),
+        ));
+    }
+
     let table_id = state
         .store
         .resolve_table_id(&raw_table_id)
@@ -279,6 +288,15 @@ async fn ingest_text_inner<R: ReasoningEngine + Clone + Send + Sync + 'static>(
     state: Arc<AppState<R>>,
     mut request: IngestTextRequest,
 ) -> ApiResult<Json<JobStatusResponse>> {
+    if !state.reasoner.is_ingestion_healthy() {
+        return Err(ApiError::ServiceUnavailable(
+            "LLM ingestion provider is currently unhealthy. \
+             Verify your LLM configuration with POST /v1/config/llm/test. \
+             The provider will auto-recover in up to 60 seconds after the issue is resolved."
+                .to_string(),
+        ));
+    }
+
     if request.title.is_empty() {
         return Err(ApiError::ValidationError("Title is required".to_string()));
     }
@@ -405,6 +423,15 @@ async fn ingest_batch_inner<R: ReasoningEngine + Clone + Send + Sync + 'static>(
     raw_table_id: String,
     documents: Vec<BatchIngestItem>,
 ) -> ApiResult<Json<BatchIngestResponse>> {
+    if !state.reasoner.is_ingestion_healthy() {
+        return Err(ApiError::ServiceUnavailable(
+            "LLM ingestion provider is currently unhealthy. \
+             Verify your LLM configuration with POST /v1/config/llm/test. \
+             The provider will auto-recover in up to 60 seconds after the issue is resolved."
+                .to_string(),
+        ));
+    }
+
     if raw_table_id.is_empty() {
         return Err(ApiError::ValidationError(
             "Table ID is required".to_string(),
@@ -495,6 +522,15 @@ async fn ingest_url_inner<R: ReasoningEngine + Clone + Send + Sync + 'static>(
     state: Arc<AppState<R>>,
     mut request: IngestUrlRequest,
 ) -> ApiResult<Json<JobStatusResponse>> {
+    if !state.reasoner.is_ingestion_healthy() {
+        return Err(ApiError::ServiceUnavailable(
+            "LLM ingestion provider is currently unhealthy. \
+             Verify your LLM configuration with POST /v1/config/llm/test. \
+             The provider will auto-recover in up to 60 seconds after the issue is resolved."
+                .to_string(),
+        ));
+    }
+
     if request.url.is_empty() {
         return Err(ApiError::ValidationError("URL is required".to_string()));
     }
