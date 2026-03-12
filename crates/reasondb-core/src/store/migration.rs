@@ -150,6 +150,8 @@ impl From<PageNodeV1> for PageNode {
             image_path: v1.image_path,
             metadata: NodeMetadata {
                 page_number: v1.metadata.page_number,
+                start_line: None,
+                end_line: None,
                 section_type: v1.metadata.section_type,
                 confidence_score: v1.metadata.confidence_score,
                 token_count: v1.metadata.token_count,

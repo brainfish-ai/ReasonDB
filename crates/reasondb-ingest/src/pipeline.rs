@@ -7,6 +7,7 @@
 //! 4. Generate summaries
 //! 5. Store in database
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -84,6 +85,28 @@ pub struct IngestStats {
     pub summarization_time_ms: u64,
     /// Total time (ms)
     pub total_time_ms: u64,
+}
+
+/// A pre-split chunk of text with caller-supplied metadata.
+///
+/// Used with [`IngestPipeline::ingest_chunks`] to bypass the extraction and
+/// chunking stages and feed content directly into the tree builder.
+#[derive(Debug, Clone)]
+pub struct ChunkInput {
+    /// The text content of this chunk
+    pub text: String,
+    /// Optional heading that names this chunk (becomes the node title)
+    pub heading: Option<String>,
+    /// Free-form metadata — any key-value pairs from the caller.
+    ///
+    /// Well-known keys extracted to typed `NodeMetadata` fields:
+    /// - `"page_number"` → `NodeMetadata.page_number`
+    /// - `"start_line"`  → `NodeMetadata.start_line`
+    /// - `"end_line"`    → `NodeMetadata.end_line`
+    /// - `"section_type"` → `NodeMetadata.section_type`
+    ///
+    /// All other keys are stored in `NodeMetadata.attributes`.
+    pub metadata: HashMap<String, serde_json::Value>,
 }
 
 /// The main ingestion pipeline
@@ -318,6 +341,9 @@ impl<R: ReasoningEngine> IngestPipeline<R> {
                                 word_count,
                                 start_page: None,
                                 end_page: None,
+                                start_line: None,
+                                end_line: None,
+                                attributes: Default::default(),
                             }
                         })
                         .collect(),
@@ -550,6 +576,9 @@ impl<R: ReasoningEngine> IngestPipeline<R> {
                 word_count,
                 start_page: None,
                 end_page: None,
+                start_line: None,
+                end_line: None,
+                attributes: Default::default(),
             });
         }
 
@@ -683,6 +712,171 @@ impl<R: ReasoningEngine> IngestPipeline<R> {
 
         stats.total_time_ms = start.elapsed().as_millis() as u64;
         Ok(IngestResult { stats, ..result })
+    }
+
+    /// Ingest pre-chunked content without extraction or chunking.
+    ///
+    /// Each [`ChunkInput`] is converted directly to a tree node. The
+    /// extraction and chunking stages are skipped entirely. Summarization
+    /// still runs if `config.generate_summaries` is enabled.
+    pub async fn ingest_chunks(
+        &self,
+        title: &str,
+        table_id: &str,
+        chunks: Vec<ChunkInput>,
+    ) -> Result<IngestResult> {
+        let start = std::time::Instant::now();
+        let mut stats = IngestStats::default();
+
+        info!(
+            "Starting pre-chunked ingestion: {} ({} chunks)",
+            title,
+            chunks.len()
+        );
+
+        let text_chunks = self.convert_chunk_inputs(chunks);
+        stats.chunks_created = text_chunks.len();
+
+        let (document, mut nodes) = self.tree_builder.build(title, table_id, text_chunks)?;
+        stats.nodes_created = nodes.len();
+
+        if self.config.generate_summaries {
+            if let Some(ref reasoner) = self.reasoner {
+                let summarizer =
+                    BatchSummarizer::new(reasoner, 10, self.config.summarizer.max_concurrent);
+                summarizer.summarize_batch(&mut nodes).await?;
+                stats.summaries_generated = nodes.len();
+            }
+        }
+
+        stats.total_time_ms = start.elapsed().as_millis() as u64;
+        Ok(IngestResult {
+            document,
+            nodes,
+            stats,
+        })
+    }
+
+    /// Ingest pre-chunked content and store in database.
+    ///
+    /// The `table_id` must reference an existing table in the database.
+    pub async fn ingest_chunks_and_store(
+        &self,
+        title: &str,
+        table_id: &str,
+        chunks: Vec<ChunkInput>,
+        store: Arc<NodeStore>,
+    ) -> Result<IngestResult>
+    where
+        R: Clone + Send + Sync + 'static,
+    {
+        if !self.config.store_in_db {
+            return self.ingest_chunks(title, table_id, chunks).await;
+        }
+
+        let start = std::time::Instant::now();
+        let mut stats = IngestStats::default();
+
+        info!(
+            "Starting pre-chunked ingestion with store: {} ({} chunks)",
+            title,
+            chunks.len()
+        );
+
+        let text_chunks = self.convert_chunk_inputs(chunks);
+        stats.chunks_created = text_chunks.len();
+
+        let (document, mut nodes) = self.tree_builder.build(title, table_id, text_chunks)?;
+        stats.nodes_created = nodes.len();
+
+        // Early flush: store document and nodes before summarization
+        store.insert_document(&document)?;
+        store.insert_nodes(&nodes)?;
+
+        if let Some(ref cb) = self.checkpoint_callback {
+            cb(document.id.clone());
+        }
+
+        if self.config.generate_summaries {
+            if let Some(ref reasoner) = self.reasoner {
+                let summarizer =
+                    BatchSummarizer::new(reasoner, 10, self.config.summarizer.max_concurrent)
+                        .with_store(store.clone());
+                summarizer.summarize_batch(&mut nodes).await?;
+                stats.summaries_generated = nodes.len();
+            }
+        }
+
+        stats.total_time_ms = start.elapsed().as_millis() as u64;
+        Ok(IngestResult {
+            document,
+            nodes,
+            stats,
+        })
+    }
+
+    /// Convert [`ChunkInput`]s into [`TextChunk`]s, extracting well-known
+    /// metadata fields and storing the rest in `NodeMetadata.attributes`
+    /// (threaded through via `TextChunk.start_line` / `end_line` / etc.).
+    fn convert_chunk_inputs(&self, chunks: Vec<ChunkInput>) -> Vec<TextChunk> {
+        use crate::chunker::DetectedHeading;
+
+        chunks
+            .into_iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let page_number = c
+                    .metadata
+                    .get("page_number")
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n as usize);
+
+                let start_line = c
+                    .metadata
+                    .get("start_line")
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n as u32);
+
+                let end_line = c
+                    .metadata
+                    .get("end_line")
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n as u32);
+
+                let heading = c.heading.map(|text| DetectedHeading {
+                    text,
+                    level: 1,
+                    offset: 0,
+                    page_number,
+                });
+
+                // All keys other than the well-known ones are stored in
+                // NodeMetadata.attributes so callers can pass arbitrary fields.
+                let known_keys = ["page_number", "start_line", "end_line", "section_type"];
+                let attributes: HashMap<String, String> = c
+                    .metadata
+                    .iter()
+                    .filter(|(k, _)| !known_keys.contains(&k.as_str()))
+                    .map(|(k, v)| (k.clone(), v.to_string()))
+                    .collect();
+
+                let char_count = c.text.chars().count();
+                let word_count = c.text.split_whitespace().count();
+
+                TextChunk {
+                    id: format!("chunk_{}", i),
+                    content: c.text,
+                    heading,
+                    char_count,
+                    word_count,
+                    start_page: page_number,
+                    end_page: None,
+                    start_line,
+                    end_line,
+                    attributes,
+                }
+            })
+            .collect()
     }
 
     /// Ingest URL and store in database
@@ -911,6 +1105,9 @@ impl<R: ReasoningEngine> IngestPipeline<R> {
                                 word_count,
                                 start_page: None,
                                 end_page: None,
+                                start_line: None,
+                                end_line: None,
+                                attributes: Default::default(),
                             }
                         })
                         .collect(),

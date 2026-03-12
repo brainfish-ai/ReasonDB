@@ -3,7 +3,9 @@
 //! Jobs are persisted to redb so they survive server restarts.
 //! Clients poll `/v1/jobs/:id` for status updates.
 
-use crate::routes::ingest::{IngestResponse, IngestTextRequest, IngestUrlRequest};
+use crate::routes::ingest::{
+    IngestChunksRequest, IngestResponse, IngestTextRequest, IngestUrlRequest,
+};
 use crate::state::AppState;
 use chrono::{DateTime, Utc};
 use reasondb_core::llm::ReasoningEngine;
@@ -72,6 +74,7 @@ pub enum JobRequest {
     Text(IngestTextRequest),
     Url(IngestUrlRequest),
     File(IngestFileRequest),
+    Chunks(IngestChunksRequest),
 }
 
 impl JobRequest {
@@ -80,6 +83,7 @@ impl JobRequest {
             JobRequest::Text(r) => &r.title,
             JobRequest::Url(r) => &r.url,
             JobRequest::File(r) => &r.filename,
+            JobRequest::Chunks(r) => &r.title,
         }
     }
 
@@ -88,6 +92,7 @@ impl JobRequest {
             JobRequest::Text(r) => &r.table_id,
             JobRequest::Url(r) => &r.table_id,
             JobRequest::File(r) => &r.table_id,
+            JobRequest::Chunks(r) => &r.table_id,
         }
     }
 }
@@ -454,12 +459,16 @@ async fn process_job<R: ReasoningEngine + Clone + Send + Sync + 'static>(
         JobRequest::File(r) => r
             .generate_summaries
             .unwrap_or(state.config.generate_summaries),
+        JobRequest::Chunks(r) => r
+            .generate_summaries
+            .unwrap_or(state.config.generate_summaries),
     };
 
     let chunk_strategy_str = match &job.request {
         JobRequest::Text(r) => r.chunk_strategy.as_deref(),
         JobRequest::Url(r) => r.chunk_strategy.as_deref(),
         JobRequest::File(r) => r.chunk_strategy.as_deref(),
+        JobRequest::Chunks(_) => None,
     }
     .or_else(|| Some(state.config.chunk_strategy.as_str()));
 
@@ -571,6 +580,47 @@ async fn process_job<R: ReasoningEngine + Clone + Send + Sync + 'static>(
             }
 
             let mut result = ingest_result.map_err(|e| e.to_string())?;
+
+            let mut doc = result.document.clone();
+            let mut needs_update = false;
+            if let Some(tags) = &req.tags {
+                doc.tags = tags.clone();
+                needs_update = true;
+            }
+            if let Some(metadata) = &req.metadata {
+                doc.metadata = metadata.clone();
+                needs_update = true;
+            }
+            if needs_update {
+                state
+                    .store
+                    .update_document(&doc)
+                    .map_err(|e| e.to_string())?;
+                result.document = doc;
+            }
+
+            result
+        }
+        JobRequest::Chunks(req) => {
+            let chunk_inputs: Vec<reasondb_ingest::ChunkInput> = req
+                .chunks
+                .iter()
+                .map(|c| reasondb_ingest::ChunkInput {
+                    text: c.text.clone(),
+                    heading: c.heading.clone(),
+                    metadata: c.metadata.clone().unwrap_or_default(),
+                })
+                .collect();
+
+            let mut result = pipeline
+                .ingest_chunks_and_store(
+                    &req.title,
+                    &req.table_id,
+                    chunk_inputs,
+                    state.store.clone(),
+                )
+                .await
+                .map_err(|e| e.to_string())?;
 
             let mut doc = result.document.clone();
             let mut needs_update = false;

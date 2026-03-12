@@ -52,7 +52,8 @@ pub use chunker::{
 pub use error::{IngestError, Result};
 pub use extractor::{DocumentType, ExtractionResult, SmartExtractor};
 pub use pipeline::{
-    IngestPipeline, IngestResult, IngestStats, NoOpReasoner, PipelineBuilder, PipelineConfig,
+    ChunkInput, IngestPipeline, IngestResult, IngestStats, NoOpReasoner, PipelineBuilder,
+    PipelineConfig,
 };
 pub use summarizer::{BatchSummarizer, MockSummarizer, NodeSummarizer, SummarizerConfig};
 pub use tree_builder::TreeBuilder;

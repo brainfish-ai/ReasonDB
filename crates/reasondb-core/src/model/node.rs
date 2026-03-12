@@ -191,6 +191,12 @@ pub struct NodeMetadata {
     /// Page number in the source document (if applicable)
     pub page_number: Option<u32>,
 
+    /// Line number where this node starts in the source file
+    pub start_line: Option<u32>,
+
+    /// Line number where this node ends in the source file
+    pub end_line: Option<u32>,
+
     /// Type of section (e.g., "chapter", "section", "paragraph")
     pub section_type: Option<String>,
 
@@ -221,6 +227,13 @@ impl NodeMetadata {
     /// Set the page number.
     pub fn with_page(mut self, page: u32) -> Self {
         self.page_number = Some(page);
+        self
+    }
+
+    /// Set the source line range.
+    pub fn with_lines(mut self, start: u32, end: u32) -> Self {
+        self.start_line = Some(start);
+        self.end_line = Some(end);
         self
     }
 

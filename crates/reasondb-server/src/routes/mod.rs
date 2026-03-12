@@ -76,6 +76,10 @@ fn v1_routes<R: ReasoningEngine + Clone + Send + Sync + 'static>(
             "/tables/:table_name/ingest/url",
             post(ingest::ingest_url_for_table::<R>),
         )
+        .route(
+            "/tables/:table_name/ingest/chunks",
+            post(ingest::ingest_chunks_for_table::<R>),
+        )
         // Jobs
         .route("/jobs", get(jobs::list_jobs::<R>))
         .route("/jobs/:id", get(jobs::get_job::<R>))

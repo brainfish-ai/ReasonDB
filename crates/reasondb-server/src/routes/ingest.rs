@@ -604,3 +604,128 @@ pub async fn ingest_url_for_table<R: ReasoningEngine + Clone + Send + Sync + 'st
     )
     .await
 }
+
+// ==================== Chunks ingestion ====================
+
+/// A single pre-split chunk with free-form metadata.
+///
+/// Well-known metadata keys: `page_number`, `start_line`, `end_line`, `section_type`.
+/// Any other keys are stored in `NodeMetadata.attributes`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ChunkBodyItem {
+    /// The text content of this chunk
+    #[schema(example = "This section covers the introduction to the topic...")]
+    pub text: String,
+    /// Optional heading / title for this chunk. Used as the node title.
+    #[serde(default)]
+    #[schema(example = "Introduction")]
+    pub heading: Option<String>,
+    /// Free-form metadata — pass any key-value pairs.
+    /// Well-known keys: page_number (u32), start_line (u32), end_line (u32), section_type (string).
+    /// All other keys are stored in NodeMetadata.attributes.
+    #[serde(default)]
+    #[schema(example = json!({"page_number": 1, "start_line": 10, "end_line": 25, "source": "pdfplumber"}))]
+    pub metadata: Option<std::collections::HashMap<String, serde_json::Value>>,
+}
+
+/// Body for pre-chunked ingestion (table name comes from the URL path)
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct IngestChunksBody {
+    /// Document title
+    #[schema(example = "My Research Paper")]
+    pub title: String,
+    /// Optional document description (stored in document metadata)
+    #[serde(default)]
+    #[schema(example = "A paper about machine learning techniques")]
+    pub description: Option<String>,
+    /// Pre-split text chunks with their metadata
+    pub chunks: Vec<ChunkBodyItem>,
+    /// Whether to generate LLM summaries (default: true)
+    #[serde(default)]
+    pub generate_summaries: Option<bool>,
+    /// Document tags for filtering
+    #[serde(default)]
+    #[schema(example = json!(["research", "ml"]))]
+    pub tags: Option<Vec<String>>,
+    /// Document-level metadata (key-value pairs)
+    #[serde(default)]
+    #[schema(example = json!({"author": "Alice", "year": 2026}))]
+    pub metadata: Option<std::collections::HashMap<String, serde_json::Value>>,
+}
+
+/// Internal job-queue payload for pre-chunked ingestion.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IngestChunksRequest {
+    pub title: String,
+    pub table_id: String,
+    pub chunks: Vec<ChunkBodyItem>,
+    #[serde(default)]
+    pub generate_summaries: Option<bool>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub metadata: Option<std::collections::HashMap<String, serde_json::Value>>,
+}
+
+/// Ingest pre-chunked content into a specific table (async — returns a job ID)
+///
+/// Accepts an array of text chunks with optional per-chunk metadata.
+/// Bypasses the extraction and chunking stages — content is fed directly
+/// into the tree builder and summarizer. Per-chunk metadata (e.g.
+/// `start_line`, `end_line`, `page_number`) is preserved on each node.
+#[utoipa::path(
+    post,
+    path = "/v1/tables/{table_name}/ingest/chunks",
+    tag = "ingestion",
+    params(("table_name" = String, Path, description = "Table name or slug")),
+    request_body = IngestChunksBody,
+    responses(
+        (status = 202, description = "Ingestion job queued", body = JobStatusResponse),
+        (status = 404, description = "Table not found", body = ErrorResponse),
+        (status = 422, description = "Validation failed", body = ErrorResponse),
+    )
+)]
+pub async fn ingest_chunks_for_table<R: ReasoningEngine + Clone + Send + Sync + 'static>(
+    State(state): State<Arc<AppState<R>>>,
+    Path(table_name): Path<String>,
+    Json(body): Json<IngestChunksBody>,
+) -> ApiResult<Json<JobStatusResponse>> {
+    let table_id = state
+        .store
+        .resolve_table_id(&table_name)
+        .map_err(ApiError::from)?;
+
+    state
+        .store
+        .get_table(&table_id)
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::NotFound(format!("Table '{}' not found", table_name)))?;
+
+    info!(
+        "Queuing chunks ingestion: '{}' ({} chunks) into table: {}",
+        body.title,
+        body.chunks.len(),
+        table_id
+    );
+
+    let request = IngestChunksRequest {
+        title: body.title,
+        table_id,
+        chunks: body.chunks,
+        generate_summaries: body.generate_summaries,
+        tags: body.tags,
+        metadata: body.metadata,
+    };
+
+    let job_id = state
+        .job_queue
+        .enqueue(JobRequest::Chunks(request))
+        .map_err(ApiError::Internal)?;
+
+    let status = state
+        .job_queue
+        .get_status(&job_id)
+        .ok_or_else(|| ApiError::Internal("Job not found after enqueue".to_string()))?;
+
+    Ok(Json(status))
+}
