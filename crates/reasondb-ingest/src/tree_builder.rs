@@ -24,6 +24,8 @@ struct BuildNode {
     end_line: Option<u32>,
     attributes: std::collections::HashMap<String, String>,
     is_leaf: bool,
+    /// Pre-supplied summary from the caller; skips LLM generation when set.
+    summary: Option<String>,
 }
 
 /// Builder for constructing hierarchical document trees
@@ -116,6 +118,7 @@ impl TreeBuilder {
             end_line: None,
             attributes: std::collections::HashMap::new(),
             is_leaf: false,
+            summary: None,
         });
 
         // Process each chunk
@@ -153,6 +156,7 @@ impl TreeBuilder {
                 end_line: chunk.end_line,
                 attributes: chunk.attributes.clone(),
                 is_leaf: true, // Will update if children are added
+                summary: chunk.summary.clone(),
             };
 
             nodes.push(node);
@@ -192,12 +196,13 @@ impl TreeBuilder {
 
     /// Convert BuildNode to PageNode
     fn to_page_node(&self, node: BuildNode, document_id: &str) -> PageNode {
+        let pre_supplied_summary = node.summary.clone();
         let mut page_node = if node.is_leaf && !node.content.is_empty() {
             PageNode::new_leaf(
                 document_id.to_string(),
                 node.title.clone(),
                 node.content.clone(),
-                String::new(), // Summary will be filled by summarizer
+                pre_supplied_summary.clone().unwrap_or_default(),
                 node.depth,
             )
         } else {
@@ -291,6 +296,7 @@ impl TreeBuilder {
                     start_line: None,
                     end_line: None,
                     attributes: Default::default(),
+                    summary: None,
                 });
             }
         }
@@ -364,6 +370,7 @@ mod tests {
                 start_line: None,
                 end_line: None,
                 attributes: Default::default(),
+                summary: None,
             },
             TextChunk {
                 id: "2".to_string(),
@@ -381,6 +388,7 @@ mod tests {
                 start_line: None,
                 end_line: None,
                 attributes: Default::default(),
+                summary: None,
             },
             TextChunk {
                 id: "3".to_string(),
@@ -398,6 +406,7 @@ mod tests {
                 start_line: None,
                 end_line: None,
                 attributes: Default::default(),
+                summary: None,
             },
         ];
 
@@ -443,6 +452,7 @@ mod tests {
                 start_line: None,
                 end_line: None,
                 attributes: Default::default(),
+                summary: None,
             },
             TextChunk {
                 id: "2".to_string(),
@@ -460,6 +470,7 @@ mod tests {
                 start_line: None,
                 end_line: None,
                 attributes: Default::default(),
+                summary: None,
             },
             TextChunk {
                 id: "3".to_string(),
@@ -477,6 +488,7 @@ mod tests {
                 start_line: None,
                 end_line: None,
                 attributes: Default::default(),
+                summary: None,
             },
         ];
 

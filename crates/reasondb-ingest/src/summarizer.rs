@@ -88,9 +88,11 @@ impl<'a, R: ReasoningEngine> NodeSummarizer<'a, R> {
                 depth
             );
 
-            // Collect all inputs for this depth level (immutable reads)
+            // Collect all inputs for this depth level (immutable reads).
+            // Skip nodes that already carry a pre-supplied summary.
             let work_items: Vec<(usize, String, SummarizationContext)> = indices_at_depth
                 .iter()
+                .filter(|&&idx| nodes[idx].summary.is_empty())
                 .map(|&idx| {
                     let node = &nodes[idx];
                     let content = self.get_summarization_content(node, nodes, &node_map);
@@ -304,7 +306,7 @@ impl<'a, R: ReasoningEngine> BatchSummarizer<'a, R> {
             let indices: Vec<usize> = nodes
                 .iter()
                 .enumerate()
-                .filter(|(_, n)| n.depth == depth)
+                .filter(|(_, n)| n.depth == depth && n.summary.is_empty())
                 .map(|(i, _)| i)
                 .collect();
 

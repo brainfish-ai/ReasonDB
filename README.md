@@ -152,6 +152,7 @@ flowchart TD
         A["Documents / URLs"] -->|Extractor Plugin| B["Markdown"]
         B -->|Post-Processor Plugin| C["Cleaned Markdown"]
         C -->|Chunker| D["Semantic Chunks"]
+        P["Pre-chunked JSON"] -->|"bypasses extract + chunk"| D
         D --> E["Build Hierarchical Tree"]
         E -->|Bottom-up| F["LLM Summarizes Each Node"]
     end
@@ -173,9 +174,9 @@ flowchart TD
 ```
 
 1. **Extract** - Extractor plugins convert documents and URLs to Markdown (built-in: [MarkItDown](https://github.com/microsoft/markitdown))
-2. **Chunk** - Content is split into semantic chunks with heading detection
-3. **Build Tree** - Chunks are organized into a hierarchical tree structure
-4. **Summarize** - LLM generates summaries for each node (bottom-up)
+2. **Chunk** - Content is split into semantic chunks with heading detection — or bypass entirely with pre-chunked JSON via `/ingest/chunks`
+3. **Build Tree** - Chunks are organized into a hierarchical tree structure, preserving per-chunk metadata (page numbers, line ranges, custom attributes)
+4. **Summarize** - LLM generates summaries for each node (bottom-up); pre-supplied summaries are used as-is
 5. **Search** - 4-phase pipeline: BM25 candidate selection → recursive tree-grep filtering → LLM summary ranking → parallel beam-search traversal
 6. **Return** - Relevant content with extracted answers, confidence scores, and the full reasoning path
 

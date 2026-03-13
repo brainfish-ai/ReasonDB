@@ -15,6 +15,7 @@ All file and URL extraction is handled by the [plugin system](/guides/plugins). 
         Text[Text/Markdown]
         File[PDF/Word/Excel]
         URL[Web Pages/YouTube]
+        Chunks[Pre-chunked JSON]
     end
 
     subgraph Pipeline
@@ -33,6 +34,7 @@ All file and URL extraction is handled by the [plugin system](/guides/plugins). 
     Text --> Extract
     File --> Extract
     URL --> Extract
+    Chunks -->|bypasses extract + chunk| Tree
     Extract --> Post --> Chunk --> Tree --> Summary --> DB
     Summary --> Index`}
 </Mermaid>
@@ -230,6 +232,114 @@ curl -X POST http://localhost:4444/v1/tables/videos/ingest/url \
 ```
 
 Poll the returned `job_id` for completion. The video transcript will be extracted and organized into a searchable tree.
+
+## Ingest Pre-chunked Content
+
+If you have already split your document into chunks — for example using `pdfplumber`, a custom NLP pipeline, or any other tool — you can ingest them directly via the `/ingest/chunks` endpoint. This **bypasses the extraction and chunking stages entirely** and feeds your content straight into the tree builder and LLM summarizer.
+
+This is useful when:
+- You need precise per-chunk metadata (exact page numbers, source line ranges, bounding boxes)
+- You are ingesting output from an existing chunking pipeline
+- You want full control over how your content is split
+
+```bash
+curl -X POST http://localhost:4444/v1/tables/my_documents/ingest/chunks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Research Paper",
+    "description": "Extracted with pdfplumber",
+    "chunks": [
+      {
+        "text": "The mitochondria is the powerhouse of the cell...",
+        "heading": "Biology Basics",
+        "metadata": {
+          "page_number": 1,
+          "start_line": 1,
+          "end_line": 12,
+          "source": "pdfplumber"
+        }
+      },
+      {
+        "text": "Photosynthesis converts sunlight into glucose...",
+        "heading": "Plant Biology",
+        "metadata": {
+          "page_number": 2,
+          "start_line": 13,
+          "end_line": 28
+        }
+      }
+    ],
+    "tags": ["biology", "research"],
+    "metadata": {"author": "Alice", "year": 2026}
+  }'
+```
+
+Response (HTTP 202) — same job polling pattern as other endpoints:
+
+```json
+{
+  "job_id": "job_abc123",
+  "status": "queued",
+  "created_at": "2026-01-30T10:00:00Z",
+  "updated_at": "2026-01-30T10:00:00Z"
+}
+```
+
+LLM summaries and cross-references are always generated automatically for pre-chunked content.
+
+### Chunk parameters
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `text` | Yes | The text content of this chunk |
+| `heading` | No | Heading / title for the chunk — used as the node title in the tree |
+| `summary` | No | Pre-computed summary. If provided, the LLM summarization step is skipped for this node |
+| `metadata` | No | Free-form JSON object. Well-known keys are promoted to typed fields; all others are stored in `NodeMetadata.attributes` |
+
+### Well-known metadata keys
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `page_number` | integer | Page number in the source document |
+| `start_line` | integer | Line number where this chunk starts in the source file |
+| `end_line` | integer | Line number where this chunk ends |
+| `section_type` | string | Section type (e.g. `"chapter"`, `"paragraph"`, `"table"`) |
+
+Any other keys you pass in `metadata` are stored as custom attributes on the node and are available for filtering via RQL.
+
+### Providing pre-computed summaries
+
+If your pipeline has already generated summaries (e.g. via a separate LLM call), pass them in the `summary` field to skip LLM generation for that chunk:
+
+```bash
+curl -X POST http://localhost:4444/v1/tables/my_documents/ingest/chunks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "My Doc",
+    "chunks": [
+      {
+        "text": "Full text of the section...",
+        "heading": "Introduction",
+        "summary": "This section introduces the core concepts.",
+        "metadata": {"page_number": 1}
+      }
+    ]
+  }'
+```
+
+<Tip>
+Mix pre-computed and auto-generated summaries freely. Chunks with a `summary` field use it directly; chunks without one get an LLM-generated summary automatically.
+</Tip>
+
+### Body parameters
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `title` | Yes | Document title |
+| `description` | No | Optional document description |
+| `chunks` | Yes | Array of chunk objects (see above) |
+| `tags` | No | Array of tags for filtering |
+| `metadata` | No | Document-level metadata key-value pairs |
 
 ## Metadata and Tags
 

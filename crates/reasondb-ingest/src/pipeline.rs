@@ -97,6 +97,12 @@ pub struct ChunkInput {
     pub text: String,
     /// Optional heading that names this chunk (becomes the node title)
     pub heading: Option<String>,
+    /// Optional pre-computed summary for this chunk.
+    ///
+    /// When provided, this summary is applied directly to the node and the LLM
+    /// summarization step is skipped for that node. If absent, a summary is
+    /// generated automatically by the `BatchSummarizer`.
+    pub summary: Option<String>,
     /// Free-form metadata — any key-value pairs from the caller.
     ///
     /// Well-known keys extracted to typed `NodeMetadata` fields:
@@ -344,6 +350,7 @@ impl<R: ReasoningEngine> IngestPipeline<R> {
                                 start_line: None,
                                 end_line: None,
                                 attributes: Default::default(),
+                                summary: None,
                             }
                         })
                         .collect(),
@@ -579,6 +586,7 @@ impl<R: ReasoningEngine> IngestPipeline<R> {
                 start_line: None,
                 end_line: None,
                 attributes: Default::default(),
+                summary: None,
             });
         }
 
@@ -874,6 +882,7 @@ impl<R: ReasoningEngine> IngestPipeline<R> {
                     start_line,
                     end_line,
                     attributes,
+                    summary: c.summary,
                 }
             })
             .collect()
@@ -1108,6 +1117,7 @@ impl<R: ReasoningEngine> IngestPipeline<R> {
                                 start_line: None,
                                 end_line: None,
                                 attributes: Default::default(),
+                                summary: None,
                             }
                         })
                         .collect(),

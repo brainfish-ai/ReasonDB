@@ -620,6 +620,11 @@ pub struct ChunkBodyItem {
     #[serde(default)]
     #[schema(example = "Introduction")]
     pub heading: Option<String>,
+    /// Optional pre-computed summary. If provided, the LLM summarization step
+    /// is skipped for this node. If absent, a summary is auto-generated.
+    #[serde(default)]
+    #[schema(example = "Introduces the core concepts of the topic.")]
+    pub summary: Option<String>,
     /// Free-form metadata — pass any key-value pairs.
     /// Well-known keys: page_number (u32), start_line (u32), end_line (u32), section_type (string).
     /// All other keys are stored in NodeMetadata.attributes.
@@ -640,9 +645,6 @@ pub struct IngestChunksBody {
     pub description: Option<String>,
     /// Pre-split text chunks with their metadata
     pub chunks: Vec<ChunkBodyItem>,
-    /// Whether to generate LLM summaries (default: true)
-    #[serde(default)]
-    pub generate_summaries: Option<bool>,
     /// Document tags for filtering
     #[serde(default)]
     #[schema(example = json!(["research", "ml"]))]
@@ -659,8 +661,6 @@ pub struct IngestChunksRequest {
     pub title: String,
     pub table_id: String,
     pub chunks: Vec<ChunkBodyItem>,
-    #[serde(default)]
-    pub generate_summaries: Option<bool>,
     #[serde(default)]
     pub tags: Option<Vec<String>>,
     #[serde(default)]
@@ -712,7 +712,6 @@ pub async fn ingest_chunks_for_table<R: ReasoningEngine + Clone + Send + Sync + 
         title: body.title,
         table_id,
         chunks: body.chunks,
-        generate_summaries: body.generate_summaries,
         tags: body.tags,
         metadata: body.metadata,
     };

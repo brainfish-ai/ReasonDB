@@ -459,9 +459,7 @@ async fn process_job<R: ReasoningEngine + Clone + Send + Sync + 'static>(
         JobRequest::File(r) => r
             .generate_summaries
             .unwrap_or(state.config.generate_summaries),
-        JobRequest::Chunks(r) => r
-            .generate_summaries
-            .unwrap_or(state.config.generate_summaries),
+        JobRequest::Chunks(_) => true,
     };
 
     let chunk_strategy_str = match &job.request {
@@ -608,6 +606,7 @@ async fn process_job<R: ReasoningEngine + Clone + Send + Sync + 'static>(
                 .map(|c| reasondb_ingest::ChunkInput {
                     text: c.text.clone(),
                     heading: c.heading.clone(),
+                    summary: c.summary.clone(),
                     metadata: c.metadata.clone().unwrap_or_default(),
                 })
                 .collect();
