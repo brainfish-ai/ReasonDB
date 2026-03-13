@@ -156,8 +156,17 @@ jobs:
           cp -r "$RUNNER_TEMP/rql-editor/dist" "$GITHUB_WORKSPACE/packages/rql-editor/dist"
 
       - name: Install frontend dependencies
-        working-directory: apps/reasondb-client
-        run: npm ci
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/apps/reasondb-client" "$RUNNER_TEMP/packages"
+          cp "$GITHUB_WORKSPACE/apps/reasondb-client/package.json"      "$RUNNER_TEMP/apps/reasondb-client/"
+          cp "$GITHUB_WORKSPACE/apps/reasondb-client/package-lock.json" "$RUNNER_TEMP/apps/reasondb-client/"
+          cp -r "$GITHUB_WORKSPACE/packages/rql-editor/." "$RUNNER_TEMP/packages/rql-editor/"
+          cd "$RUNNER_TEMP/apps/reasondb-client"
+          npm ci
+          rm -rf node_modules/@reasondb/rql-editor
+          cp -r "$RUNNER_TEMP/packages/rql-editor/." node_modules/@reasondb/rql-editor/
+          mv node_modules "$GITHUB_WORKSPACE/apps/reasondb-client/node_modules"
 
       - name: Build and release (Tauri)
         uses: tauri-apps/tauri-action@v0
