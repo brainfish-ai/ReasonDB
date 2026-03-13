@@ -139,6 +139,13 @@ jobs:
         with:
           workspaces: apps/reasondb-client/src-tauri -> target
 
+      - name: Ensure Rust targets are installed
+        if: matrix.rust-targets != ''
+        run: |
+          for target in $(echo "${{ matrix.rust-targets }}" | tr ',' ' '); do
+            rustup target add $target
+          done
+
       - name: Build @reasondb/rql-editor workspace package
         shell: bash
         run: |
