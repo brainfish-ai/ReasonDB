@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import {
   Clock,
   Star,
@@ -17,8 +17,9 @@ import { useLlmHealthStore } from '@/stores/llmHealthStore'
 import { useQueryStore } from '@/stores/queryStore'
 import { ConnectionList } from '@/components/connection/ConnectionList'
 import { ConnectionForm } from '@/components/connection/ConnectionForm'
+import { ApiKeyPromptDialog } from '@/components/connection/ApiKeyPromptDialog'
 import { TableBrowser } from '@/components/table/TableBrowser'
-import { createClient, setClient, removeClient } from '@/lib/api'
+import { createClient, setClient, removeClient, type ReasonDBClient } from '@/lib/api'
 
 export function Sidebar() {
   const { 
@@ -30,6 +31,10 @@ export function Sidebar() {
   const { showConnectionForm, setShowConnectionForm, setShowQueryHistory, setShowSavedQueries } = useUiStore()
   const { history, savedQueries } = useQueryStore()
   const [editingConnection, setEditingConnection] = useState<Connection | undefined>()
+
+  // Pending auth — set when a server requires auth but the connection has no key
+  const [pendingAuthConnection, setPendingAuthConnection] = useState<Connection | null>(null)
+  const pendingClientRef = useRef<ReasonDBClient | null>(null)
 
   const handleConnect = async (connection: Connection) => {
     setConnecting(true)
@@ -44,18 +49,58 @@ export function Sidebar() {
       })
 
       const result = await client.testConnection()
-      
-      if (result.success) {
-        setClient(connection.id, client)
-        setActiveConnection(connection.id)
-      } else {
+
+      if (!result.success) {
         setConnectionError(result.error || 'Connection failed')
+        return
       }
+
+      // If no apiKey is already configured, probe to see if the server requires one
+      if (!connection.apiKey) {
+        const { authRequired } = await client.checkAuth()
+        if (authRequired) {
+          // Park the client and surface the API key prompt
+          pendingClientRef.current = client
+          setPendingAuthConnection(connection)
+          return
+        }
+      }
+
+      setClient(connection.id, client)
+      setActiveConnection(connection.id)
     } catch (error) {
       setConnectionError(error instanceof Error ? error.message : 'Connection failed')
     } finally {
       setConnecting(false)
     }
+  }
+
+  const handleApiKeySubmit = async (apiKey: string): Promise<boolean> => {
+    if (!pendingAuthConnection || !pendingClientRef.current) return false
+
+    const client = pendingClientRef.current
+    client.updateApiKey(apiKey)
+
+    // Validate the key by making a real authenticated request
+    try {
+      await client.listTables()
+    } catch {
+      // 401/403 or other error — key is invalid or request failed
+      return false
+    }
+
+    // Key is valid — complete the connection
+    setClient(pendingAuthConnection.id, client)
+    setActiveConnection(pendingAuthConnection.id)
+    setPendingAuthConnection(null)
+    pendingClientRef.current = null
+    return true
+  }
+
+  const handleApiKeyCancel = () => {
+    setPendingAuthConnection(null)
+    pendingClientRef.current = null
+    setConnecting(false)
   }
 
   const handleDisconnect = () => {
@@ -217,6 +262,13 @@ export function Sidebar() {
         open={showConnectionForm}
         onOpenChange={setShowConnectionForm}
         editConnection={editingConnection}
+      />
+
+      <ApiKeyPromptDialog
+        open={pendingAuthConnection !== null}
+        connectionName={pendingAuthConnection?.name ?? ''}
+        onSubmit={handleApiKeySubmit}
+        onCancel={handleApiKeyCancel}
       />
     </nav>
   )

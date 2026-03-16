@@ -34,12 +34,24 @@ function App() {
       useSsl: activeConnection.ssl,
     })
 
-    client.testConnection().then((result) => {
-      if (result.success) {
-        setClient(activeConnectionId, client)
-      } else {
+    client.testConnection().then(async (result) => {
+      if (!result.success) {
         setActiveConnection(null)
+        return
       }
+
+      // If the persisted connection has no API key, check whether auth is required.
+      // If so, drop the active connection so the user is brought back to the
+      // connection list where clicking the row will show the API key prompt.
+      if (!activeConnection.apiKey) {
+        const { authRequired } = await client.checkAuth()
+        if (authRequired) {
+          setActiveConnection(null)
+          return
+        }
+      }
+
+      setClient(activeConnectionId, client)
     }).catch(() => {
       setActiveConnection(null)
     })

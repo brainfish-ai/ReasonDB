@@ -770,6 +770,38 @@ class ReasonDBClient {
     requestCache.clear()
   }
 
+  // ==================== Auth ====================
+
+  /**
+   * Update the API key on this client instance (in-memory only).
+   * Called after a successful auth prompt so the client can make authenticated requests.
+   */
+  updateApiKey(apiKey: string): void {
+    this.apiKey = apiKey
+  }
+
+  /**
+   * Detect whether the server requires an API key by probing /v1/tables
+   * without any auth header.
+   *
+   * Returns `{ authRequired: true }` on 401/403, `{ authRequired: false }` on
+   * any successful response, and `{ authRequired: false, error }` on network
+   * errors so callers don't block the connect flow for transient failures.
+   */
+  async checkAuth(): Promise<{ authRequired: boolean; error?: string }> {
+    const url = `${this.baseUrl}/v1/tables`
+    try {
+      const response = await fetch(url, { method: 'GET' })
+      if (response.status === 401 || response.status === 403) {
+        return { authRequired: true }
+      }
+      return { authRequired: false }
+    } catch {
+      // Network error — treat as no auth required so we don't block the flow
+      return { authRequired: false }
+    }
+  }
+
   // ==================== Health ====================
 
   /**
