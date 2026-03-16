@@ -104,19 +104,23 @@ jobs:
             artifacts/checksums-sha256.txt
 
   build-desktop:
-    name: Build Desktop (${{ matrix.platform }})
+    name: Build Desktop (${{ matrix.platform }} ${{ matrix.args }})
     needs: release
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
-          # macos-latest resolves to macos-15-arm64 which has network instability
-          # on long-running jobs (notarization polls Apple for 30-50 min).
-          # Pin to macos-13 (x86_64, Ventura) for a stable network environment.
-          - platform: macos-13
-            args: --target universal-apple-darwin
-            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+          # Two separate macOS jobs (arm64 + x86_64) instead of one universal
+          # binary job. Each job notarizes a ~50% smaller binary, cutting
+          # notarization time and reducing exposure to runner network drops.
+          # macos-13 was deprecated; macos-latest is the supported runner.
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+            rust-targets: aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+            rust-targets: x86_64-apple-darwin
           - platform: windows-latest
             args: ''
             rust-targets: ''
@@ -173,7 +177,7 @@ jobs:
           mv node_modules "$GITHUB_WORKSPACE/apps/reasondb-client/node_modules"
 
       - name: Build and release (Tauri)
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUSTC_WRAPPER: ''
@@ -191,10 +195,11 @@ jobs:
           releaseBody: |
             See the assets below to download and install ReasonDB ${{ github.ref_name }}.
 
-            **macOS:** Download the `.dmg` file and drag ReasonDB into your Applications folder.
+            **macOS:** Download the `.dmg` for your chip (`aarch64` = Apple Silicon M1+, `x86_64` = Intel) and drag ReasonDB into your Applications folder.
             **Windows:** Download the `.msi` or `.exe` installer and run it.
           releaseDraft: false
           prerelease: false
+          retryAttempts: 3
           args: ${{ matrix.args }}
 
   update-homebrew:
