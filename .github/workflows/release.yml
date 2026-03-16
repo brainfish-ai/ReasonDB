@@ -179,7 +179,7 @@ jobs:
       - name: Build and release (Tauri)
         uses: tauri-apps/tauri-action@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           RUSTC_WRAPPER: ''
           NODE_OPTIONS: --max-old-space-size=4096
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
