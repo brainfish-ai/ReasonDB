@@ -1,5 +1,4 @@
 import {
-  Database,
   PlugsConnected,
   BookOpen,
   Lightning,
@@ -9,6 +8,7 @@ import {
 import { open } from '@tauri-apps/plugin-shell'
 import { cn } from '@/lib/utils'
 import { useConnectionStore } from '@/stores/connectionStore'
+import logoUrl from '@/assets/logo.svg'
 
 interface WelcomeScreenProps {
   onNewConnection: () => void
@@ -20,20 +20,20 @@ export function WelcomeScreen({ onNewConnection }: WelcomeScreenProps) {
   const features = [
     {
       icon: Brain,
-      title: 'REASON Queries',
-      description: 'Ask questions in natural language and get intelligent answers',
+      title: 'Hierarchical Reasoning',
+      description: 'LLM-guided tree traversal over your documents. Not chunks, not embeddings.',
       color: 'text-mauve',
     },
     {
       icon: MagnifyingGlass,
-      title: 'Semantic Search',
-      description: 'Find documents by meaning, not just keywords',
+      title: 'Full Audit Trail',
+      description: '4-phase trace per query. Logged, replayable, and auditable.',
       color: 'text-blue',
     },
     {
       icon: Lightning,
-      title: 'Fast & Efficient',
-      description: 'Built with Rust for blazing fast performance',
+      title: 'Built in Rust',
+      description: 'Single binary, deploy anywhere, bring your own LLM',
       color: 'text-yellow',
     },
   ]
@@ -44,8 +44,8 @@ export function WelcomeScreen({ onNewConnection }: WelcomeScreenProps) {
         {/* Header */}
         <div className="text-center space-y-4">
           <div className="flex items-center justify-center gap-3">
-            <div className="p-3 rounded-xl bg-linear-to-br from-mauve/20 to-blue/20 border border-mauve/30">
-              <Database size={40} weight="duotone" className="text-mauve" aria-hidden="true" />
+            <div className="p-4 rounded-2xl bg-linear-to-br from-green/10 to-green/5 border border-green/20">
+              <img src={logoUrl} alt="ReasonDB" className="h-12 w-12 object-contain" aria-hidden="true" />
             </div>
           </div>
           <div>
@@ -53,7 +53,7 @@ export function WelcomeScreen({ onNewConnection }: WelcomeScreenProps) {
               Welcome to ReasonDB
             </h1>
             <p className="text-subtext-0 mt-2">
-              The AI-native database for intelligent document management
+              The AI database that reasons beyond RAG
             </p>
           </div>
         </div>
@@ -83,7 +83,7 @@ export function WelcomeScreen({ onNewConnection }: WelcomeScreenProps) {
             </button>
 
             <button
-              onClick={() => open('https://docs.reasondb.dev')}
+              onClick={() => open('https://reasondb.ai/')}
               className={cn(
                 'flex items-center gap-3 p-4 rounded-lg',
                 'bg-surface-0 hover:bg-surface-1 border border-border',

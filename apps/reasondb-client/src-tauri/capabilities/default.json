@@ -16,6 +16,11 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-is-maximized",
     "core:window:allow-set-focus",
+    "store:allow-get",
+    "store:allow-set",
+    "store:allow-delete",
+    "store:allow-save",
+    "store:allow-load",
     "shell:allow-open",
     {
       "identifier": "shell:allow-execute",

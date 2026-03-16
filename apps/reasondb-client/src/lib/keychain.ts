@@ -1,25 +1,36 @@
-import { invoke } from '@tauri-apps/api/core'
-
 /**
- * Store an API key for a connection in the OS credential store.
- * macOS  → Keychain
- * Windows → Credential Manager
- * Linux  → Secret Service / keyring
+ * Persistent API key storage via tauri-plugin-store.
+ *
+ * Keys are written to the app data directory
+ * (~/.../Application Support/com.reasondb.desktop/api-keys.json) as JSON.
+ * This avoids OS keychain prompts while still keeping secrets out of
+ * localStorage (which is visible in the webview devtools).
+ *
+ * The file is protected by normal filesystem permissions — only the
+ * logged-in user can read it.  For an application-level API key (not a
+ * user password) this is the right trade-off: no UX friction, no prompts.
  */
+
+import { load } from '@tauri-apps/plugin-store'
+
+const STORE_FILE = 'api-keys.json'
+
+async function getStore() {
+  return load(STORE_FILE, { autoSave: true })
+}
+
 export async function storeApiKey(connectionId: string, apiKey: string): Promise<void> {
-  await invoke<void>('store_api_key', { connectionId, apiKey })
+  const store = await getStore()
+  await store.set(connectionId, apiKey)
 }
 
-/**
- * Retrieve a stored API key, or null if none has been saved for this connection.
- */
 export async function getApiKey(connectionId: string): Promise<string | null> {
-  return invoke<string | null>('get_api_key', { connectionId })
+  const store = await getStore()
+  const val = await store.get<string>(connectionId)
+  return val ?? null
 }
 
-/**
- * Remove the stored API key for a connection (e.g. when the connection is deleted).
- */
 export async function deleteApiKey(connectionId: string): Promise<void> {
-  await invoke<void>('delete_api_key', { connectionId })
+  const store = await getStore()
+  await store.delete(connectionId)
 }

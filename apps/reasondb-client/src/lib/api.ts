@@ -1061,7 +1061,12 @@ class ReasonDBClient {
 
   /**
    * Execute RQL query with SSE progress streaming (for REASON queries).
-   * Emits progress events via the callback and returns the final result.
+   *
+   * When running inside Tauri the stream is handled by a native Rust command
+   * (reqwest, 5-minute timeout) to avoid WKWebView's internal resource timeout
+   * that fires on long-running requests even when keep-alive heartbeats are
+   * present.  In non-Tauri environments (e.g. browser dev) a fetch-based
+   * fallback is used instead.
    */
   async executeQueryStream(
     query: string,
@@ -1069,6 +1074,29 @@ class ReasonDBClient {
   ): Promise<QueryResult> {
     const cleanQuery = query.trim().replace(/;+$/, '').trim()
 
+    // Tauri path — route through native reqwest to bypass WKWebView timeout.
+    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      const { invoke, Channel } = await import('@tauri-apps/api/core')
+      const channel = new Channel<ReasonProgressEvent>()
+      channel.onmessage = (event) => onProgress(event)
+
+      const serverResponse = await invoke<QueryServerResponse>('execute_reason_stream', {
+        baseUrl: this.baseUrl,
+        query: cleanQuery,
+        apiKey: this.apiKey ?? null,
+        onProgress: channel,
+      })
+      return this.transformQueryResponse(serverResponse)
+    }
+
+    // Browser / non-Tauri fallback: fetch-based SSE.
+    return this.executeQueryStreamFetch(cleanQuery, onProgress)
+  }
+
+  private async executeQueryStreamFetch(
+    cleanQuery: string,
+    onProgress: (event: ReasonProgressEvent) => void,
+  ): Promise<QueryResult> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     }
@@ -1115,7 +1143,6 @@ class ReasonDBClient {
 
             buffer += decoder.decode(value, { stream: true })
 
-            // Parse SSE events from buffer — keep the last incomplete line
             const lines = buffer.split('\n')
             buffer = lines.pop() || ''
 
@@ -1128,31 +1155,24 @@ class ReasonDBClient {
               } else if (line.startsWith('data:')) {
                 eventData = line.slice(5).trim()
               } else if (line === '' && eventType && eventData) {
-                // End of an event block
                 try {
                   if (eventType === 'progress') {
-                    const progress = JSON.parse(eventData) as ReasonProgressEvent
-                    onProgress(progress)
+                    onProgress(JSON.parse(eventData) as ReasonProgressEvent)
                   } else if (eventType === 'complete') {
-                    const serverResponse = JSON.parse(eventData) as QueryServerResponse
-                    resolve(this.transformQueryResponse(serverResponse))
+                    resolve(this.transformQueryResponse(JSON.parse(eventData) as QueryServerResponse))
                     return
                   } else if (eventType === 'error') {
                     reject(new Error(eventData))
                     return
                   }
-                } catch {
-                  // Ignore malformed events
-                }
+                } catch { /* ignore malformed events */ }
                 eventType = ''
                 eventData = ''
               }
             }
           }
 
-          // Flush the decoder and any remaining buffered bytes after the stream closes.
-          // If the server omits the trailing blank line after the final event, the
-          // complete/error data stays in `buffer` and would be silently dropped above.
+          // Flush decoder — handles servers that omit the trailing blank line.
           buffer += decoder.decode()
           if (buffer.trim()) {
             let eventType = ''
@@ -1165,7 +1185,7 @@ class ReasonDBClient {
               try {
                 resolve(this.transformQueryResponse(JSON.parse(eventData) as QueryServerResponse))
                 return
-              } catch { /* fall through to reject below */ }
+              } catch { /* fall through */ }
             } else if (eventType === 'error' && eventData) {
               reject(new Error(eventData))
               return

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import {
   CheckCircle,
   WarningCircle,
@@ -6,13 +7,62 @@ import {
   Lightning,
 } from '@phosphor-icons/react'
 import type { Connection } from '@/stores/connectionStore'
+import { getClient } from '@/lib/api'
 
 interface StatusBarProps {
   connection?: Connection
 }
 
+interface Stats {
+  tableCount: number
+  documentCount: number
+  version: string
+}
+
 export function StatusBar({ connection }: StatusBarProps) {
   const isConnected = !!connection
+  const [stats, setStats] = useState<Stats | null>(null)
+
+  useEffect(() => {
+    if (!connection) {
+      setStats(null)
+      return
+    }
+
+    let cancelled = false
+
+    const fetchStats = async () => {
+      const client = getClient(connection.id)
+      if (!client) return
+
+      try {
+        const [tablesRes, healthRes] = await Promise.all([
+          client.listTables(true),
+          client.health(),
+        ])
+
+        if (cancelled) return
+
+        const documentCount = tablesRes.tables.reduce(
+          (sum, t) => sum + (t.document_count ?? 0),
+          0,
+        )
+
+        setStats({
+          tableCount: tablesRes.total,
+          documentCount,
+          version: healthRes.version ?? '',
+        })
+      } catch {
+        // Stats are best-effort — don't surface errors here.
+      }
+    }
+
+    fetchStats()
+    return () => {
+      cancelled = true
+    }
+  }, [connection?.id])
 
   return (
     <footer
@@ -39,28 +89,28 @@ export function StatusBar({ connection }: StatusBarProps) {
           )}
         </div>
 
-        {isConnected && (
+        {isConnected && stats && (
           <>
             <div className="h-3 w-px bg-border" aria-hidden="true" />
             <div className="flex items-center gap-3 text-overlay-0">
               <div className="flex items-center gap-1">
                 <Table size={12} weight="bold" aria-hidden="true" />
-                <span>3 tables</span>
+                <span>{stats.tableCount} {stats.tableCount === 1 ? 'table' : 'tables'}</span>
               </div>
               <div className="flex items-center gap-1">
                 <FileText size={12} weight="bold" aria-hidden="true" />
-                <span>150 documents</span>
+                <span>{stats.documentCount} {stats.documentCount === 1 ? 'document' : 'documents'}</span>
               </div>
             </div>
           </>
         )}
       </div>
 
-      {/* Right side - Status info */}
+      {/* Right side - version */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-1 text-overlay-0">
           <Lightning size={12} weight="fill" className="text-mauve" aria-hidden="true" />
-          <span>ReasonDB v0.1.0</span>
+          <span>ReasonDB{stats?.version ? ` v${stats.version}` : ''}</span>
         </div>
       </div>
     </footer>
