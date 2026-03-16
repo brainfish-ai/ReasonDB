@@ -15,7 +15,7 @@ const llmProvider   = config.get("llmProvider")   ?? "openai";
 const llmApiKey     = config.requireSecret("llmApiKey");
 const llmModel      = config.get("llmModel")      ?? "";
 const llmBaseUrl    = config.get("llmBaseUrl")    ?? "";
-const reasondbImage = config.get("reasondbImage") ?? "ajainvivek/reasondb:latest";
+const reasondbImage = config.get("reasondbImage") ?? "brainfishai/reasondb:latest";
 const zone          = gcpConfig.get("zone")       ?? "us-central1-a";
 const region        = gcpConfig.get("region")     ?? "us-central1";
 

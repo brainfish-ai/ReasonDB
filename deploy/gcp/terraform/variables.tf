@@ -71,7 +71,7 @@ variable "llm_base_url" {
 variable "reasondb_image" {
   description = "Docker image to pull and run"
   type        = string
-  default     = "ajainvivek/reasondb:latest"
+  default     = "brainfishai/reasondb:latest"
 }
 
 variable "name_prefix" {
