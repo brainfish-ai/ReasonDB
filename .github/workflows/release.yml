@@ -106,11 +106,15 @@ jobs:
   build-desktop:
     name: Build Desktop (${{ matrix.platform }})
     needs: release
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
+          # macos-latest resolves to macos-15-arm64 which has network instability
+          # on long-running jobs (notarization polls Apple for 30-50 min).
+          # Pin to macos-13 (x86_64, Ventura) for a stable network environment.
+          - platform: macos-13
             args: --target universal-apple-darwin
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
           - platform: windows-latest
